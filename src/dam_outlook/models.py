@@ -53,6 +53,7 @@ def load_observations(normalized_dir: Path) -> dict:
                 "storage_pct": _float(r["storage_pct"]),
                 "capacity_m3": int(r["capacity_m3"]) if r["capacity_m3"] else None,
                 "change_m3": int(r["change_m3"]) if r["change_m3"] else None,
+                "sources": r.get("sources", ""),
             }
         elif r["precip_raw"] != "":
             dam_precip.setdefault(r["date"], []).append(_float(r["precip_mm"]))

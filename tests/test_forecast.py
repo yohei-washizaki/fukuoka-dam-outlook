@@ -91,10 +91,13 @@ class BaselineTest(unittest.TestCase):
         self.assertEqual(fc.issue(self.norm, self.out, later), [])
 
         self.write_storage(days + [("2026-10-22", 960, -10, 0)])
-        self.assertEqual(len(fc.issue(self.norm, self.out, later)), 1)
-        with self.assertRaises(FileExistsError):
-            self.write_storage(days + [("2026-10-22", 950, -20, 0)])
-            fc.issue(self.norm, self.out, later)
+        written = fc.issue(self.norm, self.out, later)
+        self.assertEqual(len(written), 1)
+        self.assertEqual(json.loads(written[0].read_text())["base_sources"], "nippou")
+
+        # Same base date with changed inputs (e.g. a later run filling in rain): nothing new.
+        self.write_storage(days + [("2026-10-22", 950, -20, 0)])
+        self.assertEqual(fc.issue(self.norm, self.out, later + timedelta(hours=8)), [])
 
 
 def synthetic_history(norm, days=420, end=date(2026, 10, 22)):

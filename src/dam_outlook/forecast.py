@@ -4,9 +4,11 @@ Run: ``PYTHONPATH=src python -m dam_outlook.forecast``
 
 Each forecast is one JSON file under ``data/forecasts/<YYYY>/<MM>/`` with its
 issue time, model name and version, the exact inputs it used, and the
-predicted series. Files are created with exclusive mode and never edited. A
-model issues a new forecast only when its inputs changed since its last one,
-so re-runs on weekends (no new observations) add nothing.
+predicted series. Files are created with exclusive mode and never edited. Each
+model version issues one forecast per base date: the first run that sees a new
+observation date issues it, and later runs on the same base date add nothing,
+even when other inputs (rain, the 1-month forecast, past reports) were filled
+in since.
 """
 
 from __future__ import annotations
@@ -48,8 +50,8 @@ def issue(normalized_dir: Path, forecast_dir: Path, now: datetime) -> list[Path]
         result = fn(obs, base, now)
         if result is None:
             continue
-        sha = inputs_sha256(result["inputs"])
-        if any(f["model"] == name and f["model_version"] == version and f["inputs_sha256"] == sha for f in existing):
+        if any(f["model"] == name and f["model_version"] == version and f["base_date"] == base.isoformat()
+               for f in existing):
             continue
         doc = {
             "model": name,
@@ -57,7 +59,8 @@ def issue(normalized_dir: Path, forecast_dir: Path, now: datetime) -> list[Path]
             "issued_at": now.isoformat(timespec="seconds"),
             "base_date": base.isoformat(),
             "target": "total_storage_m3",
-            "inputs_sha256": sha,
+            "base_sources": obs["total"][base.isoformat()]["sources"],
+            "inputs_sha256": inputs_sha256(result["inputs"]),
             **result,
         }
         path = forecast_dir / now.strftime("%Y/%m") / f"{stamp(now)}__{name}-v{version}.json"
