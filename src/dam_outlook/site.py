@@ -503,7 +503,7 @@ def render(data: dict, now: datetime) -> str:
     body = "\n".join([section_now(data), section_outlook(data), section_history(data), section_verification(data), section_events(data)])
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム見通し</title><style>{CSS}</style></head>
+<meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの見通し（個人の非公式サイト）。"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム見通し</title><style>{CSS}</style></head>
 <body><main>
 <h1>福岡市のダム貯水の見通し</h1>
 <p class="sub">個人の非公式サイトです。公表値と、それをもとにした独自の予測を分けて示しています。</p>
@@ -544,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     data = load(args.normalized_dir, args.forecast_dir, args.verification_dir, args.events)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(data, datetime.now(JST)), encoding="utf-8")
-    (args.out.parent / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
+    (args.out.parent / "robots.txt").write_text("User-agent: *\nAllow: /\n", encoding="utf-8")
     # Cloudflare Pages serves index.html for unknown paths unless a 404.html exists.
     (args.out.parent / "404.html").write_text(NOT_FOUND, encoding="utf-8")
     (args.out.parent / "favicon.svg").write_text(FAVICON, encoding="utf-8")

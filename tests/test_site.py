@@ -55,7 +55,7 @@ class SiteTest(unittest.TestCase):
             self.assertIn("最小二乗法で推定", page)
             self.assertIn("2,000通り", page)
             self.assertNotIn("過去にさかのぼった答え合わせ", page)  # no hindcast.csv here
-            self.assertIn('name="robots" content="noindex', page)
+            self.assertNotIn('name="robots"', page)  # indexed since 2026-10-26
             self.assertIn('<link rel="icon" href="/favicon.svg"', page)
             self.assertIn('<link rel="apple-touch-icon" href="/apple-touch-icon.png"', page)
             self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
