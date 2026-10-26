@@ -19,7 +19,7 @@ class SiteTest(unittest.TestCase):
             data = site.load(tmp, tmp / "f", tmp / "v", tmp / "events.csv")
             page = site.render(data, datetime(2026, 10, 25, tzinfo=JST))
             self.assertIn("データがまだありません", page)
-            self.assertIn("予測はまだ発行されていません", page)
+            self.assertIn("予想はまだ発行されていません", page)
 
     def test_page_with_forecasts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,11 +44,19 @@ class SiteTest(unittest.TestCase):
             self.assertIn("公表値", page)
             self.assertIn("&lt;15%&gt;", page)  # escaped
             self.assertIn("未確認", page)
-            self.assertEqual(len(re.findall(r'<svg id="(outlook|history)"', page)), 2)
-            # Shaded in both charts: 15% (unverified) before 10/21 and 55% from it. Labels shorten to fit.
-            self.assertEqual(page.count('class="restrict"'), 4)
+            # Each chart is drawn wide and phone-sized; CSS shows one.
+            self.assertEqual(re.findall(r'<svg id="([^"]+)"', page), ["outlook", "outlook-n", "history", "history-n"])
+            # Shaded in all four: 15% (unverified) before 10/21 and 55% from it. Labels shorten to fit.
+            self.assertEqual(page.count('class="restrict"'), 8)
             labels = re.findall(r'restrict-label"[^>]*>([^<]*)</text>', page)
-            self.assertEqual(sum(x in ("筑後川取水制限 15%（1/15〜）（未確認）", "15%") for x in labels), 2)
+            # The 15% segment of the phone-sized outlook chart is too narrow for any label.
+            self.assertEqual(sum(x in ("取水制限 15%（1/15〜）（未確認）", "15%") for x in labels), 3)
+            # Summary tiles: the published rate, then the model's 28-day forecast.
+            self.assertEqual(re.findall(r'<div class="stat (\w+)">', page), ["fact", "model"])
+            self.assertIn("前回（10/21）から", page)
+            self.assertIn("4週間後（11/19）の予想", page)
+            self.assertIn('<p class="headline"><span class="sent"><span class="ph">4週間後（11/19）の</span><span class="ph">貯水率は、</span>', page)
+            self.assertIn('でしょう。</span>', page)
             self.assertIn('"筑後川取水制限": "55%"', page)
             self.assertIn("を下回る", page)
             self.assertIn("scenario_jma_tercile v1", page)
@@ -59,6 +67,19 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<link rel="icon" href="/favicon.svg"', page)
             self.assertIn('<link rel="apple-touch-icon" href="/apple-touch-icon.png"', page)
             self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
+
+    def test_headline_trend(self):
+        # Within FLAT_PT (inclusive) is flat; beyond it, up or down.
+        self.assertEqual(site.trend_phrase(39.47, 41.47)[0], "ほぼ横ばいの")
+        self.assertEqual(site.trend_phrase(39.47, 37.47)[0], "ほぼ横ばいの")
+        self.assertEqual(site.trend_phrase(39.47, 41.6)[1], "上がるでしょう。")
+        self.assertEqual(site.trend_phrase(39.47, 37.3)[1], "下がるでしょう。")
+        self.assertEqual(site.trend_phrase(39.47, 40.0)[-1], "なるでしょう。")
+        self.assertEqual(site.no_rain_phrase(39.47, 32.4)[0], "雨が降らなければ、")
+        self.assertEqual(site.no_rain_phrase(39.47, 32.4)[-1], "下がります。")
+        # Lines break only between phrases.
+        self.assertEqual(site.phrases("4週間後は", "予想しています。"),
+                         '<span class="sent"><span class="ph">4週間後は</span><span class="ph">予想しています。</span></span>')
 
 
 if __name__ == "__main__":
