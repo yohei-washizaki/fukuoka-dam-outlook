@@ -12,7 +12,7 @@ atelier の Claude Code セッション（knowledge-base での壁打ち）か�
 
 - リポジトリ作成（private）、README / AGENTS.md / docs / 出来事の初期データ / テスト雛形。
 - データ源の取得可否を 2026-10-25 に確認（[data-sources.md](data-sources.md)）。
-- 2026-10-25（forge）: plan.md の Today 1〜7 を実装し、main に push。GitHub Actions `fetch.yml` が毎日 14:45 / 0:20 JST に 取得 → 正規化 → 予測 → 検証 → サイト生成 を行い、データをコミットする。サイトは成果物 `site` としてアップロードするだけで、公開はしていない。
+- 2026-10-25（forge）: plan.md の Today 1〜7 を実装し、main に push。GitHub Actions `fetch.yml` が毎日 18:07 JST（2026-10-26 までは 14:45 / 0:20）に 取得 → 正規化 → 予測 → 検証 → サイト生成 を行い、データをコミットする。サイトは成果物 `site` としてアップロードするだけで、公開はしていない。
   - 取得: `dam_outlook.fetch`（`data/raw/`、上書きなし、`_log/` に全試行）
   - 正規化: `dam_outlook.normalize`（`data/normalized/`、[tables.md](tables.md)）。浄水日報 PDF は pypdf で読む
   - 予測: `dam_outlook.forecast` / `models`（`data/forecasts/`、[models.md](models.md)）。`baseline_norain` v1 と `scenario_jma_tercile` v1（2026-10-25 に v0 から更新）
