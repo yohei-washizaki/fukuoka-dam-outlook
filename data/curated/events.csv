@@ -1,0 +1,7 @@
+date,date_basis,kind,detail,chikugo_intake_restriction_pct,source,verified
+2026-01-16,effective,intake_restriction,第2次渇水調整 筑後川取水制限 15%,15,https://www.f-suiki.or.jp/company_post/%e7%a6%8f%e5%b2%a1%e5%9c%b0%e5%8c%ba%e6%b0%b4%e9%81%93%e4%bc%81%e6%a5%ad%e5%9b%a3-%e9%80%81%e6%b0%b4%e5%88%b6%e9%99%90%e3%81%ae%e9%96%8b%e5%a7%8b%e3%81%ab%e3%81%a4%e3%81%84%e3%81%a6%ef%bc%88%e4%bb%a4/,true
+2026-01-29,effective,intake_restriction,第3次渇水調整 筑後川取水制限 15%→30%,30,https://www.f-suiki.or.jp/company_post/%e7%a6%8f%e5%b2%a1%e5%9c%b0%e5%8c%ba%e6%b0%b4%e9%81%93%e4%bc%81%e6%a5%ad%e5%9b%a3-%e9%80%81%e6%b0%b4%e5%88%b6%e9%99%90%e3%81%ae%e5%bc%b7%e5%8c%96%e3%81%ab%e3%81%a4%e3%81%84%e3%81%a6%ef%bc%88%e4%bb%a4/,true
+2026-02-14,effective,intake_restriction,第4次渇水調整 筑後川取水制限 30%→55%,55,https://www.city.fukuoka.lg.jp/...,true
+2026-07-13,effective,restriction_lifted,渇水調整解除,0,https://www.mlit.go.jp/mizukokudo/watersupply/content/002022668.pdf,true
+2026-09-04,effective,intake_restriction,第2次渇水調整 筑後川取水制限 30%,30,https://www.city.fukuoka.lg.jp/...,true
+2026-09-18,effective,intake_restriction,第3次渇水調整 筑後川取水制限 30%→55%,55,https://www.city.fukuoka.lg.jp/...,true

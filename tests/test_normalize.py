@@ -1,0 +1,198 @@
+import csv
+import json
+import tempfile
+import unittest
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from dam_outlook import normalize as n
+from dam_outlook.raw_store import JST, RawStore
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fixture(name):
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+# Copies of Fukuoka City pages; left out of the public repository (dam_outlook.export).
+needs_city_fixtures = unittest.skipUnless(
+    all((FIXTURES / f).exists() for f in ("city_dam_text.html", "nippou_2026_10_21.txt")), "no city fixtures")
+
+
+def amedas_records(start, hours, p1h=1.0, drop=()):
+    """Point-file style records every 10 minutes; precipitation24h is left out."""
+    data = {}
+    t = start
+    while t < start + timedelta(hours=hours):
+        if t not in drop:
+            rec = {"temp": [20.0, 0]}
+            if t.minute == 0:
+                rec["precipitation1h"] = [p1h, 0]
+            data[f"{t:%Y%m%d%H%M%S}"] = rec
+        t += timedelta(minutes=10)
+    return data
+
+
+class CityDamTextTest(unittest.TestCase):
+    @needs_city_fixtures
+    def test_parse(self):
+        parsed = n.parse_city_dam_text(fixture("city_dam_text.html"))
+        self.assertEqual(parsed["observed_at"], datetime(2026, 10, 23, 9, tzinfo=JST))
+        dams = {d["dam_id"]: d for d in parsed["dams"]}
+        self.assertEqual(len(dams), 10)
+        self.assertEqual(dams["total"]["storage_pct"], 39.47)
+        self.assertEqual(dams["total"]["storage_m3"], 30927000)
+        self.assertEqual(dams["egawa"]["storage_pct"], 17.72)
+        self.assertEqual(dams["gokayama"]["dam_name"], "五ケ山ダム")
+
+    def test_missing_heading_raises(self):
+        with self.assertRaises(n.ParseError):
+            n.parse_city_dam_text("<html><table></table></html>")
+
+
+class NippouTest(unittest.TestCase):
+    @needs_city_fixtures
+    def test_parse(self):
+        parsed = n.parse_nippou_text(fixture("nippou_2026_10_21.txt"))
+        self.assertEqual(parsed["report_date"], date(2026, 10, 21))
+        dams = {d["dam_id"]: d for d in parsed["dams"]}
+        self.assertEqual(len(dams), 10)
+        self.assertEqual(dams["total"]["storage_pct"], 39.70)
+        self.assertEqual(dams["total"]["change_m3"], -152000)
+        self.assertIsNone(dams["total"]["precip_mm"])
+        self.assertEqual(dams["inono"]["precip_mm"], 2.0)
+        self.assertEqual(dams["egawa"]["precip_raw"], "-")
+        self.assertEqual(dams["egawa"]["precip_mm"], 0.0)
+        self.assertEqual(dams["egawa"]["capacity_m3"], 24000000)
+        plants = {p["plant_id"]: p["volume_m3"] for p in parsed["plants"]}
+        self.assertEqual(plants["total"], 404500)
+        self.assertEqual(sum(v for k, v in plants.items() if k != "total"), plants["total"])
+
+    @needs_city_fixtures
+    def test_wrong_value_count_raises(self):
+        text = fixture("nippou_2026_10_21.txt").replace("61.31", "")
+        with self.assertRaises(n.ParseError):
+            n.parse_nippou_text(text)
+
+
+class JmaTest(unittest.TestCase):
+    def test_p1m(self):
+        rows = n.parse_jma_p1m(json.loads(fixture("jma_p1m_010900.json")))
+        rain = [r for r in rows if r["element"] == "降水量"]
+        self.assertEqual(len(rain), 1)
+        self.assertEqual((rain[0]["below_pct"], rain[0]["normal_pct"], rain[0]["above_pct"]), (20, 30, 50))
+        self.assertEqual(rain[0]["period"], "P1M")
+        periods = [r["period"] for r in rows if r["element"] == "気温" and r["period"] != "P1M"]
+        self.assertEqual(periods, ["P7D", "P7D", "P14D"])
+
+    def test_weekly(self):
+        parsed = n.parse_jma_weekly(json.loads(fixture("jma_forecast_400000.json")))
+        self.assertEqual(len(parsed["pops"]), 7)
+        self.assertIsNone(parsed["pops"][0]["pop_pct"])
+        self.assertEqual(parsed["pops"][4], {
+            "report_datetime": "2026-10-25T11:00:00+09:00", "area_code": "400000",
+            "date": "2026-10-30", "pop_pct": 50, "reliability": "C",
+        })
+        self.assertEqual(parsed["precip_normals"][0]["max_mm"], 20.4)
+
+
+class AmedasTest(unittest.TestCase):
+    def test_prefers_24h_value(self):
+        t = datetime(2026, 10, 22, 0, tzinfo=JST)
+        records = {t: {"1h": 0.0, "24h": 13.5}}
+        self.assertEqual(n.daily_precip(records, date(2026, 10, 21), 24), 13.5)
+
+    def test_sums_hourly_when_24h_missing(self):
+        start = datetime(2026, 10, 21, 0, 10, tzinfo=JST)
+        records = n.parse_amedas_point(amedas_records(start, 24, p1h=0.5))
+        self.assertEqual(n.daily_precip(records, date(2026, 10, 21), 24), 12.0)
+        # 9to9 ending 10-21 needs 10-20 10:00 onwards
+        self.assertIsNone(n.daily_precip(records, date(2026, 10, 21), 9))
+
+    def test_gap_gives_none(self):
+        start = datetime(2026, 10, 21, 0, 10, tzinfo=JST)
+        gap = {datetime(2026, 10, 21, 5, tzinfo=JST)}
+        records = n.parse_amedas_point(amedas_records(start, 24, drop=gap))
+        self.assertIsNone(n.daily_precip(records, date(2026, 10, 21), 24))
+
+    def test_bad_quality_is_missing(self):
+        t = "20261022000000"
+        records = n.parse_amedas_point({t: {"precipitation1h": [1.0, 5], "precipitation24h": [9.0, 5]}})
+        self.assertEqual(list(records.values()), [{"1h": None, "24h": None}])
+
+
+ETRN_S1 = """<table id='tablefix1' class='data2_s'>
+<tr><th rowspan="4">日</th><th colspan="2">気圧(hPa)</th><th colspan="3">降水量(mm)</th><th>気温(℃)</th></tr>
+<tr><th>現地</th><th>海面</th><th rowspan="2">合計</th><th colspan="2">最大</th><th>平均</th></tr>
+<tr><td class="a_print"><a href="x">1</a></td><td>1010.9</td><td>1012.6</td><td>--</td><td>--</td><td>--</td><td>24.5</td></tr>
+<tr><td>2</td><td>1009.0</td><td>1011.0</td><td>15.0 )</td><td>5.0</td><td>2.0</td><td>23.0</td></tr>
+<tr><td>3</td><td>1009.0</td><td>1011.0</td><td>12.5 ]</td><td>5.0</td><td>2.0</td><td>23.0</td></tr>
+<tr><td>4</td><td>1009.0</td><td>1011.0</td><td>×</td><td>×</td><td>×</td><td>23.0</td></tr>
+</table>"""
+
+
+class EtrnTest(unittest.TestCase):
+    def test_s1_page(self):
+        rows = n.parse_etrn_daily(ETRN_S1, "2025-09")
+        self.assertEqual([(r["date"], r["precip_mm"]) for r in rows],
+                         [("2025-09-01", 0.0), ("2025-09-02", 15.0), ("2025-09-03", None), ("2025-09-04", None)])
+
+    def test_a1_page_has_precip_first(self):
+        html = ("<table id='tablefix1'><tr><th>日</th><th colspan='3'>降水量</th></tr>"
+                "<tr><td>1</td><td>13.5</td><td>13.0</td><td>10.5</td></tr></table>")
+        self.assertEqual(n.parse_etrn_daily(html, "2025-09")[0]["precip_mm"], 13.5)
+
+    def test_missing_table_raises(self):
+        with self.assertRaises(n.ParseError):
+            n.parse_etrn_daily("<html>maintenance</html>", "2025-09")
+
+
+class NormalizeRunTest(unittest.TestCase):
+    @needs_city_fixtures
+    def test_end_to_end_from_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw, out = Path(tmp) / "raw", Path(tmp) / "out"
+            store = RawStore(raw)
+            at = datetime(2026, 10, 25, 13, tzinfo=JST)
+            store.save(source="city_dam_text", key="city_dam_text", subdir="x", name="001", ext="html",
+                       url="u", fetched_at=at, status=200, body=fixture("city_dam_text.html").encode())
+            store.save(source="jma_p1m", key="jma_p1m", subdir="x", name="p", ext="json",
+                       url="u", fetched_at=at, status=200, body=fixture("jma_p1m_010900.json").encode())
+            store.save(source="jma_forecast", key="jma_forecast", subdir="x", name="f", ext="json",
+                       url="u", fetched_at=at, status=200, body=b"{broken")
+            warnings = n.normalize(raw, out)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("jma_forecast", warnings[0])
+            with (out / "dam_storage.csv").open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 10)
+            total = next(r for r in rows if r["dam_id"] == "total")
+            self.assertEqual((total["date"], total["storage_pct"], total["sources"]), ("2026-10-23", "39.47", "city_text"))
+            self.assertTrue((out / "jma_weekly_pop.csv").exists())
+
+    def test_nippou_wins_on_conflict(self):
+        tables = n.Tables()
+        d = date(2026, 10, 23)
+        n._merge_storage(tables, d, {"dam_id": "total", "dam_name": "合計", "storage_pct": 39.4, "storage_m3": 1}, "city_text")
+        n._merge_storage(tables, d, {"dam_id": "total", "dam_name": "合計", "storage_pct": 39.47, "storage_m3": 1,
+                                     "capacity_m3": 2, "change_m3": 0, "precip_mm": None, "precip_raw": ""}, "nippou")
+        row = tables.dam_storage[("2026-10-23", "total")]
+        self.assertEqual(row["storage_pct"], 39.47)
+        self.assertEqual(row["sources"], "city_text;nippou")
+        self.assertEqual(len(tables.warnings), 1)
+
+
+@unittest.skipUnless(__import__("importlib").util.find_spec("pypdf"), "pypdf not installed")
+class PdfTextTest(unittest.TestCase):
+    def test_raw_nippou_pdfs_parse(self):
+        pdfs = sorted(Path("data/raw/city_nippou").glob("*/*.pdf"))[:3]
+        if not pdfs:
+            self.skipTest("no raw daily reports")
+        for p in pdfs:
+            parsed = n.parse_nippou_text(n.pdf_text(p.read_bytes()))
+            self.assertEqual(len(parsed["dams"]), 10, p)
+
+
+if __name__ == "__main__":
+    unittest.main()

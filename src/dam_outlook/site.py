@@ -1,0 +1,556 @@
+"""Render the one-page static site from normalized data, forecasts and verification.
+
+Run: ``PYTHONPATH=src python -m dam_outlook.site`` (writes ``site/index.html``)
+
+Published values and model outputs are labelled separately on the page.
+Charts are inline SVG; a small inline script adds the hover tooltip.
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import math
+import statistics
+import sys
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlparse
+
+from .forecast import load_forecasts
+from .models import THRESHOLDS_PCT, read_csv
+from .raw_store import JST
+
+SCENARIO = "scenario_jma_tercile"
+BASELINE = "baseline_norain"
+HISTORY_DAYS = 365
+
+DAM_ORDER = ["minamihata", "gokayama", "sefuri", "magarifuchi", "egawa", "kubara", "nagatani", "inono", "zuibaiji"]
+
+
+def esc(s) -> str:
+    return html.escape("" if s is None else str(s))
+
+
+def fmt_pct(v) -> str:
+    return f"{float(v):.2f}%" if v not in (None, "") else "—"
+
+
+def fmt_m3(v) -> str:
+    return f"{int(v) / 10000:,.0f}万m³" if v not in (None, "") else "—"
+
+
+# ---------------------------------------------------------------- data
+
+
+def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, events_path: Path) -> dict:
+    storage = read_csv(normalized_dir / "dam_storage.csv")
+    total = {r["date"]: r for r in storage if r["dam_id"] == "total"}
+    latest_date = max(total) if total else None
+    dams = sorted(
+        (r for r in storage if r["date"] == latest_date and r["dam_id"] != "total"),
+        key=lambda r: DAM_ORDER.index(r["dam_id"]) if r["dam_id"] in DAM_ORDER else 99,
+    )
+    forecasts = load_forecasts(forecast_dir)
+
+    def latest_of(model):
+        fs = [f for f in forecasts if f["model"] == model]
+        return max(fs, key=lambda f: f["issued_at"]) if fs else None
+
+    return {
+        "total": total,
+        "latest_date": latest_date,
+        "dams": dams,
+        "scenario": latest_of(SCENARIO),
+        "baseline": latest_of(BASELINE),
+        "n_forecasts": len(forecasts),
+        "summary": read_csv(verification_dir / "summary.csv"),
+        "hindcast": read_csv(verification_dir / "hindcast.csv"),
+        "events": read_csv(events_path),
+        "chart_pct": chart_pct(read_csv(normalized_dir / "dam_storage_chart.csv"), set(total)),
+        "p1m": [r for r in read_csv(normalized_dir / "jma_p1m.csv") if r["element"] == "降水量" and r["period"] == "P1M"],
+    }
+
+
+def chart_pct(rows: list[dict], observed: set[str]) -> list[tuple[str, float]]:
+    """Storage rate per date read off the city's report charts (median over reports), for dates not observed."""
+    by_date: dict[str, list[float]] = {}
+    for r in rows:
+        if r["series"] == "incl_reserve" and r["capacity_m3"] and r["date"] not in observed:
+            by_date.setdefault(r["date"], []).append(100 * int(r["storage_m3"]) / int(r["capacity_m3"]))
+    return [(d, statistics.median(v)) for d, v in sorted(by_date.items())]
+
+
+# ---------------------------------------------------------------- charts
+
+
+def restriction_at(events: list[dict], d: str) -> dict | None:
+    """The restriction event in force on date d (the latest one on or before it)."""
+    past = [e for e in events if e["date"] <= d and e.get("chikugo_intake_restriction_pct", "") != ""]
+    return max(past, key=lambda e: e["date"]) if past else None
+
+
+def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: str, refs=(),
+               restrictions: list[dict] = (), fact_end: str | None = None) -> str:
+    """SVG line chart over dates. series: {name, cls, points: [(iso, value)], dash}.
+
+    restrictions (events.csv rows) shade the background up to fact_end with the
+    Chikugo intake restriction rate in force. It is a separate measure, so it gets
+    a labelled tint instead of a second y-axis.
+    """
+    w, h = 720, 300
+    ml, mr, mt, mb = 48, 120, 16, 32
+    all_pts = [p for s in series for p in s["points"]]
+    if band:
+        all_pts += [(d, lo) for d, lo, _ in band["points"]] + [(d, hi) for d, _, hi in band["points"]]
+    if not all_pts:
+        return '<p class="muted">データがまだありません。</p>'
+    dates = sorted({date.fromisoformat(d) for d, _ in all_pts})
+    d0, d1 = dates[0], dates[-1]
+    span = max((d1 - d0).days, 1)
+    vals = [v for _, v in all_pts] + list(refs)
+    lo_v, hi_v = min(vals), max(vals)
+    step = 5 if hi_v - lo_v > 8 else 1
+    y0 = (int(lo_v) // step) * step
+    y1 = (int(hi_v) // step + 1) * step
+
+    def x(d: str) -> float:
+        return ml + (date.fromisoformat(d) - d0).days / span * (w - ml - mr)
+
+    def y(v: float) -> float:
+        return mt + (y1 - v) / (y1 - y0) * (h - mt - mb)
+
+    out = [f'<svg id="{chart_id}" class="chart" viewBox="0 0 {w} {h}" role="img" aria-label="{esc(y_label)}">']
+    for v in range(y0, y1 + 1, step):
+        out.append(f'<line class="grid" x1="{ml}" x2="{w - mr}" y1="{y(v):.1f}" y2="{y(v):.1f}"/>')
+        out.append(f'<text class="tick" x="{ml - 6}" y="{y(v) + 4:.1f}" text-anchor="end">{v}%</text>')
+    out.append(f'<line class="axis" x1="{ml}" x2="{w - mr}" y1="{h - mb}" y2="{h - mb}"/>')
+    if span > 120:  # month starts
+        t = date(d0.year, d0.month, 1)
+        while t <= d1:
+            if t >= d0:
+                text = f"{t.year}/1" if t.month == 1 else f"{t.month}月"
+                out.append(f'<text class="tick" x="{x(t.isoformat()):.1f}" y="{h - mb + 18}" text-anchor="middle">{text}</text>')
+            t = date(t.year + t.month // 12, t.month % 12 + 1, 1)
+    else:
+        tick_every = 7 if span > 21 else (2 if span > 7 else 1)
+        t = d0
+        while t <= d1:
+            out.append(f'<text class="tick" x="{x(t.isoformat()):.1f}" y="{h - mb + 18}" text-anchor="middle">{t.month}/{t.day}</text>')
+            t += timedelta(days=tick_every)
+    for r in refs:
+        out.append(f'<line class="ref" x1="{ml}" x2="{w - mr}" y1="{y(r):.1f}" y2="{y(r):.1f}"/>')
+        out.append(f'<text class="tick" x="{w - mr + 4}" y="{y(r) + 4:.1f}">{r}%</text>')
+    if restrictions and fact_end:
+        # Segments [start, end) of constant rate within the visible, observed range.
+        lo_d, hi_d = d0.isoformat(), min(fact_end, d1.isoformat())
+        cuts = sorted({lo_d} | {e["date"] for e in restrictions if lo_d < e["date"] <= hi_d})
+        for i, a in enumerate(cuts):
+            b = cuts[i + 1] if i + 1 < len(cuts) else hi_d
+            e = restriction_at(restrictions, a)
+            pct = int(e["chikugo_intake_restriction_pct"]) if e else 0
+            if not pct:
+                continue
+            x_a, x_b = x(a), max(x(b), x(a) + 2)
+            note = "" if e.get("verified") == "true" else "（未確認）"
+            out.append(f'<rect class="restrict" x="{x_a:.1f}" y="{mt}" width="{x_b - x_a:.1f}" height="{h - mt - mb}" '
+                       f'style="opacity:{0.06 + 0.003 * pct:.3f}"/>')
+            # Label as much as fits in the segment; the hover tooltip always has the rate.
+            full = f'筑後川取水制限 {pct}%（{date.fromisoformat(e["date"]):%-m/%-d}〜）{note}'
+            text = full if x_b - x_a > 11 * len(full) else (f"{pct}%" if x_b - x_a > 30 else "")
+            if text:
+                out.append(f'<text class="tick restrict-label" x="{x_a + 4:.1f}" y="{h - mb - 8}">{text}</text>')
+    if band and band["points"]:
+        top = " ".join(f"{x(d):.1f},{y(hi):.1f}" for d, _, hi in band["points"])
+        bottom = " ".join(f"{x(d):.1f},{y(lo):.1f}" for d, lo, _ in reversed(band["points"]))
+        out.append(f'<polygon class="band {band["cls"]}" points="{top} {bottom}"/>')
+    labels = []
+    for s in series:
+        pts = s["points"]
+        if not pts:
+            continue
+        path = " ".join(f"{x(d):.1f},{y(v):.1f}" for d, v in pts)
+        dash = ' stroke-dasharray="6 4"' if s.get("dash") else ""
+        if len(pts) > 1:
+            out.append(f'<polyline class="line {s["cls"]}" points="{path}"{dash}/>')
+        if s.get("markers") or len(pts) == 1:
+            for d, v in pts:
+                out.append(f'<circle class="dot {s["cls"]}" cx="{x(d):.1f}" cy="{y(v):.1f}" r="4"/>')
+        d, v = pts[-1]
+        if s.get("label_left"):  # e.g. history that other lines continue from
+            out.append(f'<text class="label" x="{x(d) - 8:.1f}" y="{y(v) - 10:.1f}" text-anchor="end">{esc(s["name"])}</text>')
+            continue
+        labels.append([y(v) + 4, x(d) + 8, s["name"]])
+    # Direct labels at series ends, pushed apart vertically so they never overlap.
+    labels.sort()
+    for i in range(1, len(labels)):
+        labels[i][0] = max(labels[i][0], labels[i - 1][0] + 15)
+    for ly, lx, name in labels:
+        out.append(f'<text class="label" x="{lx:.1f}" y="{ly:.1f}">{esc(name)}</text>')
+    out.append(f'<line class="crosshair" x1="0" x2="0" y1="{mt}" y2="{h - mb}" visibility="hidden"/>')
+    out.append(f'<rect class="hit" x="{ml}" y="{mt}" width="{w - ml - mr}" height="{h - mt - mb}"/>')
+    out.append("</svg>")
+
+    # Hover data: one row per date with every series value.
+    rows: dict[str, dict] = {}
+    for s in series:
+        for d, v in s["points"]:
+            rows.setdefault(d, {})[s["name"]] = f"{v:.2f}%"
+    if band:
+        for d, lo, hi in band["points"]:
+            rows.setdefault(d, {})[band["name"]] = f"{lo:.1f}–{hi:.1f}%"
+    if restrictions and fact_end:
+        for d in rows:
+            e = restriction_at(restrictions, d) if d <= fact_end else None
+            if e:
+                rows[d]["筑後川取水制限"] = f'{e["chikugo_intake_restriction_pct"]}%'
+    hover = {
+        "x": {d: round(x(d), 1) for d in rows},
+        "rows": rows,
+    }
+    out.append(f'<script type="application/json" data-for="{chart_id}">{json.dumps(hover, ensure_ascii=False)}</script>')
+    return "\n".join(out)
+
+
+def legend(items: list[tuple[str, str, bool]]) -> str:
+    spans = []
+    for name, cls, dash in items:
+        spans.append(f'<span class="key"><svg width="22" height="10"><line class="line {cls}" x1="1" x2="21" y1="5" y2="5"{" stroke-dasharray=\"6 4\"" if dash else ""}/></svg>{esc(name)}</span>')
+    return f'<div class="legend">{"".join(spans)}</div>'
+
+
+# ---------------------------------------------------------------- sections
+
+
+def _pct_series(total: dict, start: date | None = None) -> list[tuple[str, float]]:
+    return [
+        (d, float(r["storage_pct"]))
+        for d, r in sorted(total.items())
+        if r["storage_pct"] and (start is None or date.fromisoformat(d) >= start)
+    ]
+
+
+def section_now(data: dict) -> str:
+    total, d = data["total"], data["latest_date"]
+    if not d:
+        return '<section><h2>いま</h2><p class="muted">データがまだありません。</p></section>'
+    cur = total[d]
+    week_ago = (date.fromisoformat(d) - timedelta(days=7)).isoformat()
+    prev = total.get(week_ago)
+    delta = ""
+    if prev:
+        dv = float(cur["storage_pct"]) - float(prev["storage_pct"])
+        delta = f'<p class="sub">7日前（{week_ago}）から {dv:+.2f} ポイント</p>'
+    rows = "".join(
+        f'<tr><td>{esc(r["dam_name"])}</td><td class="num">{fmt_pct(r["storage_pct"])}</td>'
+        f'<td class="num">{fmt_m3(r["storage_m3"])}</td><td class="num">{fmt_m3(r["capacity_m3"])}</td>'
+        f'<td class="num">{f"{int(r["change_m3"]) / 10000:+,.1f}万m³" if r["change_m3"] else "—"}</td></tr>'
+        for r in data["dams"]
+    )
+    return f"""<section>
+<h2>いま <span class="badge fact">公表値</span></h2>
+<div class="hero"><span class="hero-num">{float(cur["storage_pct"]):.2f}%</span>
+<span class="hero-cap">福岡市関連9ダム合計の貯水率（{esc(d)} 9時）・{fmt_m3(cur["storage_m3"])}</span></div>
+{delta}
+<details><summary>ダム別</summary>
+<table><thead><tr><th>ダム</th><th>貯水率</th><th>貯水量</th><th>利水容量</th><th>前日比</th></tr></thead><tbody>{rows}</tbody></table>
+</details>
+</section>"""
+
+
+def section_outlook(data: dict) -> str:
+    sc, bl = data["scenario"], data["baseline"]
+    f = sc or bl
+    if not f:
+        return '<section><h2>見通し</h2><p class="muted">予測はまだ発行されていません。</p></section>'
+    cap = f["inputs"]["capacity_m3"]
+    base = date.fromisoformat(f["base_date"])
+    hist = _pct_series(data["total"], base - timedelta(days=28))
+    series = [{"name": "実績", "cls": "s1", "points": hist, "markers": True, "label_left": True}]
+    band = None
+    if sc:
+        series.append({"name": "見通し", "cls": "s2", "dash": False,
+                       "points": [(f["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct_p50"]) for p in sc["forecast"]]})
+        band = {"name": "80%の範囲", "cls": "s2",
+                "points": [(p["date"], 100 * p["storage_m3_p10"] / cap, 100 * p["storage_m3_p90"] / cap) for p in sc["forecast"]]}
+    if bl:
+        series.append({"name": "雨なし", "cls": "s3", "dash": True,
+                       "points": [(bl["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct"]) for p in bl["forecast"]]})
+    keys = [("実績（公表値）", "s1", False)]
+    if sc:
+        keys.append(("見通し（中央値）と80%の範囲", "s2", False))
+    if bl:
+        keys.append(("雨が降らない場合", "s3", True))
+    chart = line_chart("outlook", series, band, "9ダム合計の貯水率の見通し", refs=(30,),
+                       restrictions=data["events"], fact_end=data["latest_date"])
+
+    prob_table = ""
+    if sc:
+        picks = [p for p in sc["forecast"] if p["horizon_days"] in (7, 14, 21, 28)]
+        head = "".join(f"<th>{p['horizon_days']}日後<br><span class=\"muted\">{p['date'][5:].replace('-', '/')}</span></th>" for p in picks)
+        body = ""
+        for t in THRESHOLDS_PCT:
+            cells = "".join(f'<td class="num">{100 * p["prob_below_pct"][str(t)]:.0f}%</td>' for p in picks)
+            body += f"<tr><td>{t}% を下回る</td>{cells}</tr>"
+        med = "".join(f'<td class="num">{p["storage_pct_p50"]:.1f}%</td>' for p in picks)
+        rng = "".join(f'<td class="num">{100 * p["storage_m3_p10"] / cap:.1f}–{100 * p["storage_m3_p90"] / cap:.1f}%</td>' for p in picks)
+        bl_row = ""
+        if bl:
+            by_h = {p["horizon_days"]: p for p in bl["forecast"]}
+            bl_row = "<tr><td>雨なしの場合</td>" + "".join(
+                f'<td class="num">{by_h[p["horizon_days"]]["storage_pct"]:.1f}%</td>' if p["horizon_days"] in by_h else "<td>—</td>"
+                for p in picks) + "</tr>"
+        p1m = sc["inputs"].get("p1m_precip")
+        p1m_text = (
+            f'使った気象庁1か月予報（{esc(p1m["report_datetime"][:10])} 発表、九州北部）: 降水量が少ない {p1m["below_pct"]}%・平年並 {p1m["normal_pct"]}%・多い {p1m["above_pct"]}%'
+            if p1m else "1か月予報がないため、雨の多い・少ないを同じ確率で扱っています"
+        )
+        prob_table = f"""<table><thead><tr><th></th>{head}</tr></thead><tbody>
+<tr><td>中央値</td>{med}</tr><tr><td>80%の範囲</td>{rng}</tr>{bl_row}{body}</tbody></table>
+<p class="note">{p1m_text}。貯水率は利水容量 {fmt_m3(cap)} に対する割合です。</p>"""
+
+    issued = datetime.fromisoformat(f["issued_at"]).astimezone(JST)
+    models = " / ".join(f'{esc(x["model"])} v{esc(x["model_version"])}' for x in (sc, bl) if x)
+    return f"""<section>
+<h2>見通し <span class="badge model">モデル出力</span></h2>
+<p class="sub">{esc(f["base_date"])} の公表値から28日先まで。{issued:%Y-%m-%d %H:%M} 更新。</p>
+{legend(keys)}
+{chart}
+{prob_table}
+<p class="note">福岡市・気象庁の見通しではなく、このサイト独自の計算です。過去の同じ季節に降った雨を、1か月予報の確率で重み付けして使っています。</p>
+<details><summary>計算方法</summary>
+{method_details(sc, bl, data["hindcast"])}
+<p class="note">モデル: {models}。</p>
+</details>
+</section>"""
+
+
+def ym(d: str) -> str:
+    return f"{int(d[:4])}年{int(d[5:7])}月"
+
+
+def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> str:
+    """How the outlook is computed, with this forecast's fitted values and the hindcast scores."""
+    parts = []
+    if bl:
+        parts.append('<p class="note">雨が降らない場合: 直近14日のうち雨のなかった日の減り方（中央値）が、この先も続くとして計算しています。</p>')
+    if not sc:
+        return "\n".join(parts)
+    pr = sc["params"]
+    quick = sum(pr["quick_m3_per_mm"])
+    tau = pr["slow_tau_days"]
+    slow = pr["slow_m3_per_mm"] / (tau * (1 - math.exp(-1 / tau)))  # total over the decay
+
+    def man(v: float) -> str:
+        return f"{v / 10000:.1f}万m³"
+
+    parts.append(f"""<ol class="note">
+<li>1日ごとの貯水量の増減を「水準 ＋ 雨で増える分」として計算します。雨は気象庁アメダスの福岡・前原・太宰府の日降水量の平均です。</li>
+<li>雨で増える分は、{ym(pr["training_first"])}以降の貯水量と雨量（{pr["training_days"]:,}日分）から最小二乗法で推定し、予測のたびに推定し直します。今回の推定では、雨1mmあたり、その日から3日後までに計{man(quick)}、その後{tau:.0f}日ほどかけてさらに{man(slow)}増えます。貯水量が利水容量の{100 * pr["full_share"]:.0f}%を超えている日は、あふれる分があるため推定に使いません。</li>
+<li>水準は、直近28日の実際の増減から雨の分を引いたものの中央値で、今回は1日あたり{man(abs(pr["level_m3_per_day"]))}{"減" if pr["level_m3_per_day"] < 0 else "増"}です。取水制限・節水・導水の効果はここに入ります。</li>
+<li>この先の雨には、2006年以降の他の年の同じ時期（前後{pr["analog_half_window_days"]}日）に実際に降った28日間の雨（{pr["analog_windows_n"]:,}通り）を使います。28日間の雨の合計で少ない・平年並・多いの3つに分け、気象庁1か月予報の確率で重み付けします。</li>
+<li>水準が今後ずれる分として、1日あたり平均0・標準偏差{man(pr["level_sigma_m3_per_day"])}のぶれを加え、{pr["n_sims"]:,}通り計算します。その中央値、10〜90%の範囲（80%の範囲）、閾値を下回る割合を表に示しています。</li>
+</ol>
+<p class="note">予測できないこと: 取水制限の強化・解除などで水準が急に変わること、予測期間中の利水容量の切り替え。</p>""")
+    hc = {(r["model"], r["horizon_days"]): r for r in hindcast
+          if (r["model"], r["model_version"]) in ((sc["model"], sc["model_version"]), (bl["model"], bl["model_version"]) if bl else (None, None))}
+    hs = [h for h in ("7", "14", "28") if (sc["model"], h) in hc]
+    if hs:
+        first = hc[(sc["model"], hs[0])]
+        rows = ""
+        for h in hs:
+            r = hc[(sc["model"], h)]
+            b = hc.get((bl["model"], h)) if bl else None
+            rows += (f'<tr><td>{h}日後</td><td class="num">{fmt_m3(r["mae_m3"])}</td>'
+                     f'<td class="num">{fmt_m3(b["mae_m3"]) if b else "—"}</td>'
+                     f'<td class="num">{fmt_m3(r["crps_approx_m3"])}</td>'
+                     f'<td class="num">{100 * float(r["p10_p90_coverage"]):.0f}%</td></tr>')
+        parts.append(f"""<p class="note">過去にさかのぼった答え合わせ: {ym(first["first_base"])}〜{ym(first["last_base"])}の毎週（{esc(first["n"])}回）について、その日までのデータだけで予測し直し、実績と比べました。雨のシナリオからはその年を除き、当時の1か月予報は残っていないため3つの区分を同じ重みにしています。</p>
+<table><thead><tr><th></th><th>中央値の誤差</th><th>雨なしの誤差</th><th>CRPS</th><th>80%の範囲に入った割合</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">誤差は貯水量の平均絶対誤差です。CRPS は範囲も含めた見通し全体の外れ具合で、小さいほど良く、雨なしの計算では誤差と同じ値になります。この期間は雨が少なかったため、中央値は雨なしの計算より外れました。</p>""")
+    parts.append('<p class="note">発行した予測は、使った入力と一緒に書き換えずに保存し、下の「答え合わせ」で実績と比べます。</p>')
+    return "\n".join(parts)
+
+
+def section_history(data: dict) -> str:
+    if not data["latest_date"]:
+        return ""
+    start = date.fromisoformat(data["latest_date"]) - timedelta(days=HISTORY_DAYS)
+    pts = _pct_series(data["total"], start)
+    est = [(d, v) for d, v in data["chart_pct"] if date.fromisoformat(d) >= start]
+    series = [{"name": "公表値", "cls": "s1", "points": pts, "markers": len(pts) < 30}]
+    if est:
+        series.insert(0, {"name": "グラフから読み取り", "cls": "s1 est", "points": est, "dash": True, "label_left": True})
+    chart = line_chart("history", series, None, "9ダム合計の貯水率の推移",
+                       restrictions=data["events"], fact_end=data["latest_date"])
+    keys = legend([("公表値", "s1", False), ("報告資料のグラフからの推定値", "s1 est", True)]) if est else ""
+    first = min(data["total"])
+    rows = "".join(
+        f'<tr><td>{esc(d)}</td><td class="num">{float(r["storage_pct"]):.2f}%</td><td class="num">{fmt_m3(r["storage_m3"])}</td>'
+        f'<td class="num">{fmt_m3(r["capacity_m3"])}</td><td>{esc(r["sources"])}</td></tr>'
+        for d, r in sorted(data["total"].items(), reverse=True)
+    )
+    return f"""<section>
+<h2>推移 <span class="badge fact">公表値</span></h2>
+<p class="sub">{esc(first)} 以降は公表値です（土日は公表されません）。それより前は、市議会への報告資料のグラフから読み取った推定値です（誤差は2万m³程度）。背景の色は筑後川の取水制限率です。</p>
+{keys}
+{chart}
+<details><summary>表で見る</summary>
+<table><thead><tr><th>日付</th><th>貯水率</th><th>貯水量</th><th>利水容量</th><th>出典</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">利水容量は季節で変わるため、貯水量が増えても貯水率が下がる日があります（例: 2026-10-21 に南畑ダムの容量が 365万→512万m³）。</p>
+</details>
+</section>"""
+
+
+def section_verification(data: dict) -> str:
+    s = data["summary"]
+    if not s:
+        body = f'<p class="muted">予測した日の公表値が出ると、ここで答え合わせします（発行済みの予測 {data["n_forecasts"]} 件）。</p>'
+    else:
+        rows = "".join(
+            f'<tr><td>{esc(r["model"])} v{esc(r["model_version"])}</td><td>{esc(r["horizon"])}日</td><td class="num">{esc(r["n"])}</td>'
+            f'<td class="num">{fmt_m3(r["mae_m3"])}</td><td class="num">{esc(r["mae_skill"]) or "—"}</td>'
+            f'<td class="num">{esc(r["p10_p90_coverage"]) or "—"}</td><td class="num">{esc(r["brier_mean"]) or "—"}</td></tr>'
+            for r in s
+        )
+        body = f"""<table><thead><tr><th>モデル</th><th>何日先</th><th>件数</th><th>平均絶対誤差</th><th>雨なし比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">雨なし比スキル = 1 − 誤差 ÷ 雨が降らない場合の誤差（0より大きければ良い）。80%範囲の的中率は 0.8 に近いほど適切です。Brier は閾値を下回る確率の誤差です（0 が最良）。</p>"""
+    return f'<section><h2>答え合わせ <span class="badge model">モデル評価</span></h2>{body}</section>'
+
+
+def section_events(data: dict) -> str:
+    rows = "".join(
+        f'<tr><td>{esc(e["date"])}</td><td>{esc(e["detail"])}</td><td class="num">{esc(e["chikugo_intake_restriction_pct"])}%</td>'
+        f'<td>{"確認済み" if e.get("verified") == "true" else "<span class=\"badge warn\">未確認</span>"}</td>'
+        f'<td>{esc(urlparse(e["source"]).netloc) if e.get("source") else "出典なし"}</td></tr>'
+        for e in sorted(data["events"], key=lambda e: e["date"], reverse=True)
+    )
+    if not rows:
+        return ""
+    unverified = ('<p class="note">未確認の行は、一次資料と照合していません。</p>'
+                  if any(e.get("verified") != "true" for e in data["events"]) else "")
+    return f"""<section>
+<h2>取水制限 <span class="badge fact">公表値</span></h2>
+<p class="sub">福岡地区水道企業団の筑後川からの取水制限率です。グラフの背景の色が濃いほど強い制限です。</p>
+<details><summary>経過を表で見る</summary>
+<table><thead><tr><th>実施日</th><th>内容</th><th>制限率</th><th>確認</th><th>出典</th></tr></thead><tbody>{rows}</tbody></table>
+{unverified}
+</details>
+</section>"""
+
+
+# ---------------------------------------------------------------- page
+
+CSS = """
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--warn:#fab219}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;
+--ink:#f0efec;--ink2:#c3c2b7;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--grid:#2c2c2a;
+--axis:#383835;--border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--s3:#199e70}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0 0 8px;display:flex;gap:8px;align-items:center}
+section{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
+.sub,.note,.muted{color:var(--ink2);font-size:13px;margin:4px 0}.muted{color:var(--muted)}
+.hero{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px}.hero-num{font-size:44px;font-weight:600}
+.hero-cap{color:var(--ink2)}
+.badge{font-size:11px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--border);color:var(--ink2)}
+.badge.fact{border-color:var(--s1)}.badge.model{border-color:var(--s2)}.badge.warn{border-color:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0;display:block;overflow-x:auto}
+th,td{padding:4px 8px;border-bottom:1px solid var(--grid);text-align:left;white-space:nowrap}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+ol.note{padding-left:20px}ol.note li{margin:2px 0}
+details summary{cursor:pointer;color:var(--ink2);font-size:13px;margin-top:8px}
+a{color:var(--s1)}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart .grid{stroke:var(--grid);stroke-width:1}.chart .axis{stroke:var(--axis);stroke-width:1}
+.chart .ref{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3}
+.chart .tick{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.chart .label{fill:var(--ink2);font-size:12px}
+.line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.line.s1{stroke:var(--s1)}.line.est{stroke-width:1.5;opacity:.8}.line.s2{stroke:var(--s2)}.line.s3{stroke:var(--s3)}
+.dot{stroke:var(--surface);stroke-width:2}.dot.s1{fill:var(--s1)}.dot.s2{fill:var(--s2)}.dot.s3{fill:var(--s3)}
+.band.s2{fill:var(--s2);opacity:.18}
+.restrict{fill:var(--warn)}.chart .restrict-label{fill:var(--ink2)}
+.crosshair{stroke:var(--axis);stroke-width:1}.hit{fill:transparent}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink2);margin:8px 0}
+.key{display:inline-flex;align-items:center;gap:6px}
+.tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);
+border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none;z-index:10}
+.tip b{display:block;margin-bottom:2px}
+footer{color:var(--muted);font-size:12px;margin-top:24px}footer p{margin:4px 0}
+@media (max-width:600px){.chart .tick{font-size:18px}.chart .label{font-size:19px}.hero-num{font-size:36px}}
+"""
+
+JS = """
+(()=>{const tip=document.createElement('div');tip.className='tip';document.body.appendChild(tip);
+document.querySelectorAll('script[data-for]').forEach(s=>{const svg=document.getElementById(s.dataset.for);if(!svg)return;
+const d=JSON.parse(s.textContent),keys=Object.keys(d.x).sort(),hit=svg.querySelector('.hit'),ch=svg.querySelector('.crosshair');
+function at(ev){const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());
+let best=keys[0];for(const k of keys){if(Math.abs(d.x[k]-p.x)<Math.abs(d.x[best]-p.x))best=k}return best}
+function show(ev){const k=at(ev);ch.setAttribute('x1',d.x[k]);ch.setAttribute('x2',d.x[k]);ch.setAttribute('visibility','visible');
+tip.innerHTML='<b>'+k+'</b>'+Object.entries(d.rows[k]).map(([n,v])=>n+': '+v).join('<br>');tip.style.display='block';
+const x=Math.min(ev.clientX+12,innerWidth-tip.offsetWidth-8);tip.style.left=x+'px';tip.style.top=(ev.clientY+12)+'px'}
+function hide(){tip.style.display='none';ch.setAttribute('visibility','hidden')}
+hit.addEventListener('pointermove',show);hit.addEventListener('pointerdown',show);hit.addEventListener('pointerleave',hide)})})();
+"""
+
+
+def render(data: dict, now: datetime) -> str:
+    body = "\n".join([section_now(data), section_outlook(data), section_history(data), section_verification(data), section_events(data)])
+    return f"""<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム見通し</title><style>{CSS}</style></head>
+<body><main>
+<h1>福岡市のダム貯水の見通し</h1>
+<p class="sub">個人の非公式サイトです。公表値と、それをもとにした独自の予測を分けて示しています。</p>
+{body}
+<footer>
+<p>{now:%Y-%m-%d %H:%M} 更新。個人の非公式サイトで、福岡市・気象庁とは関係ありません。内容の正確さは保証しません。</p>
+<p>出典: 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
+出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
+</footer>
+</main><script>{JS}</script></body></html>
+"""
+
+
+# A reservoir behind a dam wall; drawn to stay legible at 16px.
+# assets/apple-touch-icon.png is the same drawing without the rounded corners (iOS adds its own):
+# rsvg-convert -w 180 -h 180 of FAVICON with rx="7" removed.
+FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><clipPath id="c"><rect width="32" height="32" rx="7"/></clipPath><g clip-path="url(#c)"><rect width="32" height="32" fill="#1f5fae"/><path d="M0 15c3-1.6 5-1.6 8 0s5 1.6 8 0l4-.6V32H0z" fill="#8cc4ff"/><path d="M19 8h4.5L31 32H19z" fill="#f0efec"/></g></svg>
+"""
+
+NOT_FOUND = """<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>ページがありません</title>
+<style>body{margin:0;padding:24px 16px;font:15px/1.6 system-ui,sans-serif;background:#f9f9f7;color:#0b0b0b}
+@media (prefers-color-scheme:dark){body{background:#0d0d0d;color:#f0efec}a{color:#3987e5}}</style></head>
+<body><p>ページが見つかりません。<a href="/">トップへ</a></p></body></html>
+"""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--normalized-dir", type=Path, default=Path("data/normalized"))
+    parser.add_argument("--forecast-dir", type=Path, default=Path("data/forecasts"))
+    parser.add_argument("--verification-dir", type=Path, default=Path("data/verification"))
+    parser.add_argument("--events", type=Path, default=Path("data/curated/events.csv"))
+    parser.add_argument("--out", type=Path, default=Path("site/index.html"))
+    args = parser.parse_args(argv)
+    data = load(args.normalized_dir, args.forecast_dir, args.verification_dir, args.events)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(render(data, datetime.now(JST)), encoding="utf-8")
+    (args.out.parent / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
+    # Cloudflare Pages serves index.html for unknown paths unless a 404.html exists.
+    (args.out.parent / "404.html").write_text(NOT_FOUND, encoding="utf-8")
+    (args.out.parent / "favicon.svg").write_text(FAVICON, encoding="utf-8")
+    (args.out.parent / "apple-touch-icon.png").write_bytes((Path(__file__).parent / "assets" / "apple-touch-icon.png").read_bytes())
+    print(args.out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
