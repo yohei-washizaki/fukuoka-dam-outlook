@@ -50,7 +50,7 @@ class SiteTest(unittest.TestCase):
             self.assertEqual(page.count('class="restrict"'), 8)
             labels = re.findall(r'restrict-label"[^>]*>([^<]*)</text>', page)
             # The 15% segment of the phone-sized outlook chart is too narrow for any label.
-            self.assertEqual(sum(x in ("取水制限 15%（1/15〜）（未確認）", "15%") for x in labels), 3)
+            self.assertEqual(sum(x in ("取水制限 15%（1/15〜）（未確認）", "取水制限 15%（未確認）", "15%") for x in labels), 3)
             # Summary tiles: the published rate, then the model's 28-day forecast.
             self.assertEqual(re.findall(r'<div class="stat (\w+)">', page), ["fact", "model"])
             self.assertIn("前回（10/21）から", page)

@@ -120,7 +120,7 @@ def restriction_at(events: list[dict], d: str) -> dict | None:
 
 def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: str,
                restrictions: list[dict] = (), fact_end: str | None = None, narrow: bool = False) -> str:
-    """SVG line chart over dates. series: {name, cls, points: [(iso, value)], dash, label, hover_last}.
+    """SVG line chart over dates. series: {name, cls, points: [(iso, value)], dash, label, end_marker, hover_last}.
 
     restrictions (events.csv rows) shade the background up to fact_end with the
     Chikugo intake restriction rate in force. It is a separate measure, so it gets
@@ -169,8 +169,8 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
                        f'style="opacity:{0.04 + 0.002 * pct:.3f}"/>')
             # Label as much as fits in the segment, along the top edge away from the lines;
             # the hover tooltip always has the rate.
-            full = f'取水制限 {pct}%（{date.fromisoformat(e["date"]):%-m/%-d}〜）{note}'
-            text = full if x_b - x_a > 11 * len(full) else (f"{pct}%" if x_b - x_a > 30 else "")
+            choices = (f'取水制限 {pct}%（{date.fromisoformat(e["date"]):%-m/%-d}〜）{note}', f"取水制限 {pct}%{note}", f"{pct}%")
+            text = next((t for t in choices if x_b - x_a > (11 * len(t) if t != choices[-1] else 30)), "")
             if text:
                 out.append(f'<text class="tick restrict-label" x="{x_a + 4:.1f}" y="{mt + 13}">{text}</text>')
     for v in range(y0, y1 + 1, step):
@@ -206,8 +206,9 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
         dash = ' stroke-dasharray="6 4"' if s.get("dash") else ""
         if len(pts) > 1:
             out.append(f'<polyline class="line {s["cls"]}" points="{path}"{dash}/>')
-        if s.get("markers") or len(pts) == 1:
-            for d, v in pts:
+        # Only the latest value gets a dot; dots on every day crowd into a beaded line.
+        if s.get("end_marker") or len(pts) == 1:
+            for d, v in pts[-1:]:
                 out.append(f'<circle class="dot {s["cls"]}" cx="{x(d):.1f}" cy="{y(v):.1f}" r="{3 if narrow else 4}"/>')
         # Series that others continue from are named in the legend only, and so is every
         # series on a phone, where end labels would take a third of the width.
@@ -256,7 +257,7 @@ def legend(items: list[tuple[str, str, bool]], restriction: bool = False) -> str
     for name, cls, dash in items:
         spans.append(f'<span class="key"><svg width="22" height="10"><line class="line {cls}" x1="1" x2="21" y1="5" y2="5"{" stroke-dasharray=\"6 4\"" if dash else ""}/></svg>{esc(name)}</span>')
     if restriction:
-        spans.append('<span class="key"><span class="swatch"></span>背景: 筑後川の取水制限（濃いほど強い）</span>')
+        spans.append('<span class="key"><span class="swatch"></span>筑後川の取水制限</span>')
     return f'<div class="legend">{"".join(spans)}</div>'
 
 
@@ -316,7 +317,7 @@ def section_now(data: dict) -> str:
         dv = float(cur["storage_pct"]) - float(total[prev_d]["storage_pct"])
         dm = int(cur["storage_m3"]) - int(total[prev_d]["storage_m3"])
         delta = f"<br>前回（{md(prev_d)}）から {dv:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
-    tiles = [f"""<div class="stat fact"><div class="stat-label">9ダム合計の貯水率 <span class="badge fact">公表値</span></div>
+    tiles = [f"""<div class="stat fact"><div class="stat-label">現在の貯水率 <span class="badge fact">公表値</span></div>
 <div class="stat-num">{float(cur["storage_pct"]):.2f}%</div>
 <div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}{delta}</div></div>"""]
 
@@ -331,8 +332,7 @@ def section_now(data: dict) -> str:
         if bl_last and bl_last["horizon_days"] == last["horizon_days"]:
             head += phrases(*no_rain_phrase(now_pct, bl_last["storage_pct"]))
         tiles.append(f"""<div class="stat model"><div class="stat-label">{when}の予想 <span class="badge model">モデル出力</span></div>
-<div class="stat-num">{last["storage_pct_p50"]:.0f}%前後</div>
-<div class="stat-sub">このサイト独自の計算です</div></div>""")
+<div class="stat-num">{last["storage_pct_p50"]:.0f}%前後</div></div>""")
     elif bl_last:
         head = phrases(f'{weeks_or_days(bl_last["horizon_days"])}（{md(bl_last["date"])}）まで', *no_rain_phrase(now_pct, bl_last["storage_pct"]))
 
@@ -360,7 +360,7 @@ def section_outlook(data: dict) -> str:
     cap = f["inputs"]["capacity_m3"]
     base = date.fromisoformat(f["base_date"])
     hist = _pct_series(data["total"], base - timedelta(days=28))
-    series = [{"name": "実績", "cls": "s1", "points": hist, "markers": True, "label": False}]
+    series = [{"name": "実績", "cls": "s1", "points": hist, "end_marker": True, "label": False}]
     est = estimate_series(data, base - timedelta(days=28))
     if est:
         series.insert(0, est)
@@ -373,13 +373,13 @@ def section_outlook(data: dict) -> str:
     if bl:
         series.append({"name": "雨なし", "cls": "s3", "dash": True,
                        "points": [(bl["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct"]) for p in bl["forecast"]]})
-    keys = [("実績（公表値）", "s1", False)]
+    keys = [("実績", "s1", False)]
     if est:
-        keys.append(("推定値（報告資料のグラフから読み取り・補間）", "s1 est", True))
+        keys.append(("推定値", "s1 est", True))
     if sc:
-        keys.append(("予想（中央値）と80%の範囲", "s2", False))
+        keys.append(("予想", "s2", False))
     if bl:
-        keys.append(("雨が降らない場合", "s3", True))
+        keys.append(("雨なし", "s3", True))
     chart = chart_pair("outlook", series, band, "9ダム合計の貯水率の予想",
                        restrictions=data["events"], fact_end=data["latest_date"])
 
@@ -403,19 +403,21 @@ def section_outlook(data: dict) -> str:
             f'使った気象庁1か月予報（{esc(p1m["report_datetime"][:10])} 発表、九州北部）: 降水量が少ない {p1m["below_pct"]}%・平年並 {p1m["normal_pct"]}%・多い {p1m["above_pct"]}%'
             if p1m else "1か月予報がないため、雨の多い・少ないを同じ確率で扱っています"
         )
-        tables = f"""<div class="tables">
+        tables = f"""<details><summary>予想を表で見る</summary>
+<div class="tables">
 <div><h3>貯水率の予想</h3><table><thead><tr><th></th><th class="num">中央値</th><th class="num">80%の範囲</th><th class="num">雨なし</th></tr></thead><tbody>{rows}</tbody></table></div>
 <div><h3>貯水率が下回る確率</h3><table><thead><tr><th></th>{head}</tr></thead><tbody>{body}</tbody></table></div>
 </div>
-<p class="note">{p1m_text}。貯水率は利水容量 {fmt_m3(cap)} に対する割合です。</p>"""
+<p class="note">{p1m_text}。貯水率は利水容量 {fmt_m3(cap)} に対する割合です。</p>
+</details>"""
 
     issued = datetime.fromisoformat(f["issued_at"]).astimezone(JST)
     models = " / ".join(f'{esc(x["model"])} v{esc(x["model_version"])}' for x in (sc, bl) if x)
     return f"""<section>
 <h2>予想 <span class="badge model">モデル出力</span></h2>
-<p class="sub">{esc(f["base_date"])} の公表値から28日先まで。{issued:%Y-%m-%d %H:%M} 更新。福岡市・気象庁の発表ではなく、このサイト独自の計算です。</p>
-{legend(keys, restriction=True)}
 {chart}
+{legend(keys, restriction=True)}
+<p class="sub">{issued:%Y-%m-%d %H:%M} 更新</p>
 {tables}
 <details><summary>計算方法</summary>
 <p class="note">過去の同じ季節に降った雨を、1か月予報の確率で重み付けして使っています。</p>
@@ -433,7 +435,7 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
     """How the outlook is computed, with this forecast's fitted values and the hindcast scores."""
     parts = []
     if bl:
-        parts.append('<p class="note">雨が降らない場合: 直近14日のうち雨のなかった日の減り方（中央値）が、この先も続くとして計算しています。</p>')
+        parts.append('<p class="note">雨なし: この先雨が降らない場合です。直近14日のうち雨のなかった日の減り方（中央値）が、この先も続くとして計算しています。</p>')
     if not sc:
         return "\n".join(parts)
     pr = sc["params"]
@@ -478,13 +480,12 @@ def section_history(data: dict) -> str:
     start = date.fromisoformat(data["latest_date"]) - timedelta(days=HISTORY_DAYS)
     pts = _pct_series(data["total"], start)
     est = estimate_series(data, start)
-    series = [{"name": "公表値", "cls": "s1", "points": pts, "markers": len(pts) < 30}]
+    series = [{"name": "実績", "cls": "s1", "points": pts, "end_marker": True}]
     if est:
         series.insert(0, est)
     chart = chart_pair("history", series, None, "9ダム合計の貯水率の推移",
                        restrictions=data["events"], fact_end=data["latest_date"])
-    keys = legend([("公表値", "s1", False)] + ([("推定値（報告資料のグラフから読み取り・補間）", "s1 est", True)] if est else []), restriction=True)
-    first = min(data["total"])
+    keys = legend([("実績", "s1", False)] + ([("推定値", "s1 est", True)] if est else []), restriction=True)
     rows = "".join(
         f'<tr><td>{esc(d)}</td><td class="num">{float(r["storage_pct"]):.2f}%</td><td class="num">{fmt_m3(r["storage_m3"])}</td>'
         f'<td class="num">{fmt_m3(r["capacity_m3"])}</td><td>{esc(r["sources"])}</td></tr>'
@@ -492,9 +493,8 @@ def section_history(data: dict) -> str:
     )
     return f"""<section>
 <h2>推移 <span class="badge fact">公表値</span></h2>
-<p class="sub">{esc(first)} 以降は公表値です（日報のない土日は、水道局が1時間ごとに公開している貯水量の9時の値。その日の貯水率は利水容量で割って求めています）。それより前は、市議会への報告資料のグラフから読み取った推定値です（誤差は2万m³程度）。読み取りと公表値の間の数日の空白は、前後の値を直線でつないだ推定です。</p>
-{keys}
 {chart}
+{keys}
 <details><summary>貯水率を表で見る</summary>
 <table><thead><tr><th>日付</th><th>貯水率</th><th>貯水量</th><th>利水容量</th><th>出典</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="note">利水容量は季節で変わるため、貯水量が増えても貯水率が下がる日があります（例: 2026-10-21 に南畑ダムの容量が 365万→512万m³）。</p>
@@ -611,13 +611,13 @@ def render(data: dict, now: datetime) -> str:
     body = "\n".join([section_now(data), section_outlook(data), section_history(data), section_verification(data)])
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想（個人の非公式サイト）。"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム貯水予想</title><style>{CSS}</style></head>
+<meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
 <body><main>
-<h1>福岡市のダム貯水率の予想</h1>
-<p class="sub">個人の非公式サイトです。公表値と、それをもとにした独自の予想を分けて示しています。</p>
+<h1>福岡市ダム貯水率の予想サイト</h1>
+<p class="sub">公表されたデータと、それを元にした独自の予想を趣味で掲載しています。</p>
 {body}
 <footer>
-<p>{now:%Y-%m-%d %H:%M} 更新。個人の非公式サイトで、福岡市・気象庁とは関係ありません。内容の正確さは保証しません。</p>
+<p>{now:%Y-%m-%d %H:%M} 更新。福岡市水道局・気象庁とは関係ありません。内容の正確さは保証しません。</p>
 <p>出典: 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
