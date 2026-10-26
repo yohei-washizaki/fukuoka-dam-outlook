@@ -58,7 +58,7 @@ class SiteTest(unittest.TestCase):
             self.assertIn('name="robots" content="noindex', page)
             self.assertIn('<link rel="icon" href="/favicon.svg"', page)
             self.assertIn('<link rel="apple-touch-icon" href="/apple-touch-icon.png"', page)
-            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/"])
+            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
 
 
 if __name__ == "__main__":

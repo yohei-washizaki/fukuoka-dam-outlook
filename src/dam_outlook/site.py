@@ -512,6 +512,7 @@ def render(data: dict, now: datetime) -> str:
 <p>{now:%Y-%m-%d %H:%M} 更新。個人の非公式サイトで、福岡市・気象庁とは関係ありません。内容の正確さは保証しません。</p>
 <p>出典: 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
+<p>計算のコード・発行した予測・答え合わせの結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
 </footer>
 </main><script>{JS}</script></body></html>
 """
