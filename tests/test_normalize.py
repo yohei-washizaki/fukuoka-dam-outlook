@@ -183,6 +183,51 @@ class NormalizeRunTest(unittest.TestCase):
         self.assertEqual(len(tables.warnings), 1)
 
 
+HOURLY_CSV = (
+    "観測時刻,南畑ダム,五ケ山ダム,脊振ダム,曲渕ダム,江川ダム,久原ダム,長谷ダム,猪野ダム,瑞梅寺ダム,合計,\r\n"
+    "2026/10/21 10:00,2703,14050,1369,1975,4166,1047,3087,1950,747,31094,\r\n"
+    "2026/10/21 09:00,2702,14058,1370,1977,4166,1047,3088,1950,748,31106,\r\n"
+    "2026/10/20 09:00,2673,14142,1414,2010,4133,1048,3114,1974,751,31158,\r\n"
+)
+
+
+class DamHourlyCsvTest(unittest.TestCase):
+    def test_9am_rows_with_total_summed(self):
+        days = n.parse_dam_hourly_csv(HOURLY_CSV)
+        self.assertEqual(sorted(days), [date(2026, 10, 20), date(2026, 10, 21)])
+        total = {r["dam_id"]: r for r in days[date(2026, 10, 20)]}["total"]
+        # the CSV's 合計 says 31158; the dams add up to 31259 like the daily report
+        self.assertEqual((total["storage_m3"], total["capacity_m3"], total["storage_pct"]), (31259000, 76877000, 40.66))
+        mh = {r["dam_id"]: r for r in days[date(2026, 10, 21)]}["minamihata"]
+        self.assertEqual((mh["dam_name"], mh["capacity_m3"], mh["storage_pct"]), ("南畑ダム", 5120000, 52.77))
+
+    def test_capacity_changes_after_flood_season(self):
+        self.assertEqual(n.capacity_m3("total", date(2026, 10, 20)), 76877000)
+        self.assertEqual(n.capacity_m3("total", date(2026, 10, 21)), 78347000)
+        self.assertEqual(n.capacity_m3("total", date(2026, 5, 31)), 78347000)
+
+    def test_unexpected_header_raises(self):
+        with self.assertRaises(n.ParseError):
+            n.parse_dam_hourly_csv("時刻,A,B\n")
+
+    def test_ranked_below_daily_report(self):
+        tables = n.Tables()
+        d = date(2026, 10, 21)
+        hourly = {r["dam_id"]: r for r in n.parse_dam_hourly_csv(HOURLY_CSV)[d]}["total"]
+        n._merge_storage(tables, d, hourly, "bodik_hourly")
+        n._merge_storage(tables, d, {"dam_id": "total", "dam_name": "合計", "storage_pct": 39.7, "storage_m3": 31107000,
+                                     "capacity_m3": 78347000, "change_m3": -152000, "precip_mm": None, "precip_raw": ""}, "nippou")
+        n._merge_storage(tables, d, hourly, "bodik_hourly")
+        row = tables.dam_storage[("2026-10-21", "total")]
+        self.assertEqual((row["storage_m3"], row["storage_pct"], row["change_m3"]), (31107000, 39.7, -152000))
+        self.assertEqual(row["sources"], "bodik_hourly;nippou")
+        self.assertEqual(tables.warnings, [])  # 1千m³ apart: a rounding step
+
+        n._merge_storage(tables, d, {**hourly, "storage_m3": 31007000, "storage_pct": 39.58}, "bodik_hourly")
+        self.assertEqual(row["storage_m3"], 31107000)
+        self.assertEqual(len(tables.warnings), 2)
+
+
 @unittest.skipUnless(__import__("importlib").util.find_spec("pypdf"), "pypdf not installed")
 class PdfTextTest(unittest.TestCase):
     def test_raw_nippou_pdfs_parse(self):

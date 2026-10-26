@@ -3,7 +3,8 @@
 Run: ``PYTHONPATH=src python -m dam_outlook.fetch``
 
 Sources whose past values cannot be re-fetched (the city text page, the daily
-water report PDFs, AMeDAS point data kept for about ten days) are fetched every
+water report PDFs, the hourly dam CSV that covers only recent weeks, AMeDAS
+point data kept for about ten days) are fetched every
 run, and missing recent dates are backfilled while upstream still has them.
 """
 
@@ -30,6 +31,12 @@ CITY_DAM_TEXT_URL = "https://www.city.fukuoka.lg.jp/..."
 CITY_NIPPOU_URL = (
     "https://www.city.fukuoka.lg.jp/..."
     "nippou_{d:%Y_%m_%d}.pdf"
+)
+# 福岡市関連９ダム貯水量 on BODIK (Fukuoka City, CC BY): hourly storage per dam,
+# Shift_JIS CSV, newest first. On 2026-10-26 it held every hour since 10/01 00:00.
+BODIK_DAM_HOURLY_URL = (
+    "https://data.bodik.jp/dataset/d54fb22e-5b64-485c-8816-69f27ed1aaf1/"
+    "resource/a5b26052-26d1-4c7a-b63f-5736de453bc1/download"
 )
 JMA_P1M_URL = "https://www.jma.go.jp/bosai/season/data/P1M/010900.json"
 JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/400000.json"
@@ -131,6 +138,9 @@ class Fetcher:
 
     def fetch_city_dam_text(self):
         return self.fetch_snapshot("city_dam_text", CITY_DAM_TEXT_URL, "001", "html")
+
+    def fetch_bodik_dam_hourly(self):
+        return self.fetch_snapshot("bodik_dam_hourly", BODIK_DAM_HOURLY_URL, "dam_hourly", "csv")
 
     def fetch_jma_p1m(self):
         return self.fetch_snapshot("jma_p1m", JMA_P1M_URL, "P1M_010900", "json")
@@ -307,6 +317,7 @@ class Fetcher:
         steps = {
             "city_dam_text": self.fetch_city_dam_text,
             "city_nippou": self.fetch_city_nippou,
+            "bodik_dam_hourly": self.fetch_bodik_dam_hourly,
             "jma_p1m": self.fetch_jma_p1m,
             "jma_forecast": self.fetch_jma_forecast,
             "jma_amedas_table": self.fetch_jma_amedas_table,

@@ -61,6 +61,12 @@ class FetchTest(unittest.TestCase):
         log = (self.root / "_log/2026-10.jsonl").read_text().splitlines()
         self.assertEqual(len(log), 3)
 
+    def test_hourly_dam_csv_stored_as_is(self):
+        body = "観測時刻,南畑ダム\r\n".encode("cp932")
+        rec = self.fetcher(FakeWeb({fetch.BODIK_DAM_HOURLY_URL: (200, body)})).fetch_bodik_dam_hourly()
+        self.assertEqual(rec.path, "bodik_dam_hourly/2026/10/dam_hourly__20261026T140000+0900.csv.gz")
+        self.assertEqual(gzip.decompress((self.root / rec.path).read_bytes()), body)
+
     def test_snapshot_error_is_logged_and_reported(self):
         f = self.fetcher(FakeWeb({fetch.JMA_P1M_URL: (None, b"timed out")}))
         self.assertIsNone(f.fetch_jma_p1m())

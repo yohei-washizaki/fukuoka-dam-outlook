@@ -68,6 +68,20 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<link rel="apple-touch-icon" href="/apple-touch-icon.png"', page)
             self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
 
+    def test_chart_estimates_bridge_short_gap(self):
+        chart = [{"date": d, "series": "incl_reserve", "storage_m3": m3, "capacity_m3": "100"}
+                 for d, m3 in (("2026-09-28", "40"), ("2026-09-29", "42"))]
+        total = {"2026-10-01": {"storage_pct": "44.0", "storage_m3": "44"}}
+        est = site.chart_pct(chart, total)
+        self.assertEqual([d for d, _ in est], ["2026-09-28", "2026-09-29", "2026-09-30"])
+        self.assertAlmostEqual(est[-1][1], 43.0)
+        s = site.estimate_series({"chart_pct": est, "total": total}, datetime(2026, 9, 1).date())
+        self.assertEqual(s["points"][-1], ("2026-10-01", 44.0))
+        self.assertFalse(s["hover_last"])
+
+        far = {"2026-10-09": {"storage_pct": "44.0", "storage_m3": "44"}}
+        self.assertEqual(len(site.chart_pct(chart, far)), 2)
+
     def test_headline_trend(self):
         # Within FLAT_PT (inclusive) is flat; beyond it, up or down.
         self.assertEqual(site.trend_phrase(39.47, 41.47)[0], "ほぼ横ばいの")

@@ -428,6 +428,61 @@ def parse_etrn_daily(html: str, month: str) -> list[dict]:
     return rows
 
 
+# ---------------------------------------------------------------- hourly dam CSV (BODIK)
+
+# Water-use capacity per dam in m³, as printed in the daily reports. 南畑 is
+# lower from 6/1 to 10/20 (the city's storage chart labels that period's total
+# 76,877千m³ and the rest of the year 78,347千m³).
+CAPACITY_M3 = {
+    "minamihata": 5_120_000, "gokayama": 31_700_000, "sefuri": 3_979_000,
+    "magarifuchi": 2_368_000, "egawa": 24_000_000, "kubara": 1_460_000,
+    "nagatani": 4_850_000, "inono": 3_650_000, "zuibaiji": 1_220_000,
+}
+MINAMIHATA_FLOOD_SEASON_M3 = 3_650_000
+
+
+def capacity_m3(dam: str, d: date) -> int:
+    if dam == "total":
+        return sum(capacity_m3(k, d) for k in CAPACITY_M3)
+    if dam == "minamihata" and (6, 1) <= (d.month, d.day) <= (10, 20):
+        return MINAMIHATA_FLOOD_SEASON_M3
+    return CAPACITY_M3[dam]
+
+
+def parse_dam_hourly_csv(text: str) -> dict[date, list[dict]]:
+    """Daily rows (the 9:00 record, as in the daily report) from the hourly CSV in 千m³.
+
+    The total is the sum of the dams: the CSV's own 合計 column was off by up to
+    104千m³ for some hours in 2026-10, while the daily report's total equals the sum.
+    """
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows or rows[0][0] != "観測時刻":
+        raise ParseError("header 観測時刻 not found")
+    names = [_squash(c).removesuffix("ダム") for c in rows[0][1:] if c]
+    if names[-1] != "合計" or len(names) != 10:
+        raise ParseError(f"unexpected columns {rows[0]!r}")
+    ids = [dam_id(nm) for nm in names[:-1]]
+    out = {}
+    for r in rows[1:]:
+        if not r or not r[0]:
+            continue
+        t = datetime.strptime(r[0], "%Y/%m/%d %H:%M")
+        if t.hour != 9 or t.minute != 0:
+            continue
+        d = t.date()
+        m3 = {i: int(_number(v)) * 1000 for i, v in zip(ids, r[1:10])}
+        m3["total"] = sum(m3.values())
+        out[d] = [
+            {"dam_id": i, "dam_name": next(k for k, v in DAM_IDS.items() if v == i) + ("" if i == "total" else "ダム"),
+             "storage_m3": v, "capacity_m3": capacity_m3(i, d),
+             "storage_pct": round(100 * v / capacity_m3(i, d), 2)}
+            for i, v in m3.items()
+        ]
+    if not out:
+        raise ParseError("no 9:00 rows")
+    return out
+
+
 # ---------------------------------------------------------------- tables
 
 
@@ -460,6 +515,19 @@ TABLE_COLUMNS = {
 }
 
 
+# When sources disagree, the first one here wins (and a warning is kept).
+STORAGE_SOURCE_RANK = ("nippou", "city_text", "bodik_hourly")
+# The hourly CSV is in 千m³ and its rate is computed here, so it differs from the
+# daily report by a rounding step on most days; only larger gaps are warned about.
+HOURLY_TOLERANCE_M3 = 2000
+
+
+def _rounding_gap(cur: dict, row: dict, source: str) -> bool:
+    if "bodik_hourly" not in (source, *cur["sources"].split(";")):
+        return False
+    return abs(int(cur["storage_m3"]) - int(row["storage_m3"])) <= HOURLY_TOLERANCE_M3
+
+
 def _merge_storage(tables: Tables, d: date, row: dict, source: str):
     key = (d.isoformat(), row["dam_id"])
     cur = tables.dam_storage.get(key)
@@ -467,17 +535,21 @@ def _merge_storage(tables: Tables, d: date, row: dict, source: str):
         cur = {c: "" for c in TABLE_COLUMNS["dam_storage"]}
         cur.update(date=key[0], dam_id=row["dam_id"], dam_name=row["dam_name"], sources="")
         tables.dam_storage[key] = cur
+    srcs = set(filter(None, cur["sources"].split(";")))
+    wins = all(STORAGE_SOURCE_RANK.index(source) < STORAGE_SOURCE_RANK.index(s) for s in srcs)
     for k in ("storage_pct", "storage_m3"):
         if cur[k] != "" and cur[k] != row[k]:
-            tables.warnings.append(f"dam_storage {key} {k}: {cur[k]} ({cur['sources']}) vs {row[k]} ({source})")
-            if source != "nippou":
-                continue  # the daily report wins
+            if not _rounding_gap(cur, row, source):
+                tables.warnings.append(f"dam_storage {key} {k}: {cur[k]} ({cur['sources']}) vs {row[k]} ({source})")
+            if not wins:
+                continue
         cur[k] = row[k]
     for k in ("capacity_m3", "change_m3", "precip_mm", "precip_raw"):
-        if k in row and row[k] is not None:
+        if k in row and row[k] is not None and (wins or cur[k] == ""):
             cur[k] = row[k]
-    srcs = set(filter(None, cur["sources"].split(";"))) | {source}
-    cur["sources"] = ";".join(sorted(srcs))
+    if wins:
+        cur["dam_name"] = row["dam_name"]
+    cur["sources"] = ";".join(sorted(srcs | {source}))
 
 
 def build_tables(store: RawStore) -> Tables:
@@ -501,6 +573,10 @@ def build_tables(store: RawStore) -> Tables:
                     _merge_storage(tables, d, row, "nippou")
                 for row in parsed["plants"]:
                     tables.distribution[(d.isoformat(), row["plant_id"])] = {"date": d.isoformat(), **row}
+            elif source == "bodik_dam_hourly":
+                for d, rows in parse_dam_hourly_csv(body.decode("cp932")).items():
+                    for row in rows:
+                        _merge_storage(tables, d, row, "bodik_hourly")
             elif source == "jma_p1m":
                 for row in parse_jma_p1m(json.loads(body)):
                     k = (row["report_datetime"], row["area_code"], row["element"], row["period_start"], row["period"])

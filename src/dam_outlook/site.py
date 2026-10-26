@@ -68,18 +68,45 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
         "summary": read_csv(verification_dir / "summary.csv"),
         "hindcast": read_csv(verification_dir / "hindcast.csv"),
         "events": read_csv(events_path),
-        "chart_pct": chart_pct(read_csv(normalized_dir / "dam_storage_chart.csv"), set(total)),
+        "chart_pct": chart_pct(read_csv(normalized_dir / "dam_storage_chart.csv"), total),
         "p1m": [r for r in read_csv(normalized_dir / "jma_p1m.csv") if r["element"] == "降水量" and r["period"] == "P1M"],
     }
 
 
-def chart_pct(rows: list[dict], observed: set[str]) -> list[tuple[str, float]]:
-    """Storage rate per date read off the city's report charts (median over reports), for dates not observed."""
+GAP_FILL_DAYS = 3  # a gap this short between the chart readings and published values is interpolated
+
+
+def chart_pct(rows: list[dict], total: dict) -> list[tuple[str, float]]:
+    """Storage rate per date read off the city's report charts (median over reports), for dates not observed.
+
+    A short gap up to the next published value is filled by linear interpolation,
+    so the estimate line meets the published line.
+    """
     by_date: dict[str, list[float]] = {}
     for r in rows:
-        if r["series"] == "incl_reserve" and r["capacity_m3"] and r["date"] not in observed:
+        if r["series"] == "incl_reserve" and r["capacity_m3"] and r["date"] not in total:
             by_date.setdefault(r["date"], []).append(100 * int(r["storage_m3"]) / int(r["capacity_m3"]))
-    return [(d, statistics.median(v)) for d, v in sorted(by_date.items())]
+    est = [(d, statistics.median(v)) for d, v in sorted(by_date.items())]
+    if est:
+        d0, v0 = date.fromisoformat(est[-1][0]), est[-1][1]
+        after = [d for d in total if d > est[-1][0] and total[d]["storage_pct"]]
+        if after:
+            d1 = date.fromisoformat(min(after))
+            v1 = float(total[d1.isoformat()]["storage_pct"])
+            gap = (d1 - d0).days
+            if 1 < gap <= GAP_FILL_DAYS + 1:
+                est += [((d0 + timedelta(days=i)).isoformat(), v0 + (v1 - v0) * i / gap) for i in range(1, gap)]
+    return est
+
+
+def estimate_series(data: dict, start: date) -> dict | None:
+    """The dashed estimate line from start, ending on the first published value it leads into."""
+    est = [(d, v) for d, v in data["chart_pct"] if date.fromisoformat(d) >= start]
+    if not est:
+        return None
+    nxt = (date.fromisoformat(est[-1][0]) + timedelta(days=1)).isoformat()
+    end = [(nxt, float(data["total"][nxt]["storage_pct"]))] if nxt in data["total"] else []
+    return {"name": "推定値", "cls": "s1 est", "points": est + end, "hover_last": not end, "dash": True, "label": False}
 
 
 # ---------------------------------------------------------------- charts
@@ -93,7 +120,7 @@ def restriction_at(events: list[dict], d: str) -> dict | None:
 
 def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: str,
                restrictions: list[dict] = (), fact_end: str | None = None, narrow: bool = False) -> str:
-    """SVG line chart over dates. series: {name, cls, points: [(iso, value)], dash, label}.
+    """SVG line chart over dates. series: {name, cls, points: [(iso, value)], dash, label, hover_last}.
 
     restrictions (events.csv rows) shade the background up to fact_end with the
     Chikugo intake restriction rate in force. It is a separate measure, so it gets
@@ -197,7 +224,7 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
     # Hover data: one row per date with every series value.
     rows: dict[str, dict] = {}
     for s in series:
-        for d, v in s["points"]:
+        for d, v in s["points"] if s.get("hover_last", True) else s["points"][:-1]:
             rows.setdefault(d, {})[s["name"]] = f"{v:.2f}%"
     if band:
         for d, lo, hi in band["points"]:
@@ -331,6 +358,9 @@ def section_outlook(data: dict) -> str:
     base = date.fromisoformat(f["base_date"])
     hist = _pct_series(data["total"], base - timedelta(days=28))
     series = [{"name": "実績", "cls": "s1", "points": hist, "markers": True, "label": False}]
+    est = estimate_series(data, base - timedelta(days=28))
+    if est:
+        series.insert(0, est)
     band = None
     if sc:
         series.append({"name": "予想", "cls": "s2", "dash": False,
@@ -341,6 +371,8 @@ def section_outlook(data: dict) -> str:
         series.append({"name": "雨なし", "cls": "s3", "dash": True,
                        "points": [(bl["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct"]) for p in bl["forecast"]]})
     keys = [("実績（公表値）", "s1", False)]
+    if est:
+        keys.append(("推定値（報告資料のグラフから読み取り・補間）", "s1 est", True))
     if sc:
         keys.append(("予想（中央値）と80%の範囲", "s2", False))
     if bl:
@@ -442,13 +474,13 @@ def section_history(data: dict) -> str:
         return ""
     start = date.fromisoformat(data["latest_date"]) - timedelta(days=HISTORY_DAYS)
     pts = _pct_series(data["total"], start)
-    est = [(d, v) for d, v in data["chart_pct"] if date.fromisoformat(d) >= start]
+    est = estimate_series(data, start)
     series = [{"name": "公表値", "cls": "s1", "points": pts, "markers": len(pts) < 30}]
     if est:
-        series.insert(0, {"name": "グラフから読み取り", "cls": "s1 est", "points": est, "dash": True, "label": False})
+        series.insert(0, est)
     chart = chart_pair("history", series, None, "9ダム合計の貯水率の推移",
                        restrictions=data["events"], fact_end=data["latest_date"])
-    keys = legend([("公表値", "s1", False)] + ([("報告資料のグラフからの推定値", "s1 est", True)] if est else []), restriction=True)
+    keys = legend([("公表値", "s1", False)] + ([("推定値（報告資料のグラフから読み取り・補間）", "s1 est", True)] if est else []), restriction=True)
     first = min(data["total"])
     rows = "".join(
         f'<tr><td>{esc(d)}</td><td class="num">{float(r["storage_pct"]):.2f}%</td><td class="num">{fmt_m3(r["storage_m3"])}</td>'
@@ -457,7 +489,7 @@ def section_history(data: dict) -> str:
     )
     return f"""<section>
 <h2>推移 <span class="badge fact">公表値</span></h2>
-<p class="sub">{esc(first)} 以降は公表値です（土日は公表されません）。それより前は、市議会への報告資料のグラフから読み取った推定値です（誤差は2万m³程度）。</p>
+<p class="sub">{esc(first)} 以降は公表値です（日報のない土日は、水道局が1時間ごとに公開している貯水量の9時の値。その日の貯水率は利水容量で割って求めています）。それより前は、市議会への報告資料のグラフから読み取った推定値です（誤差は2万m³程度）。読み取りと公表値の間の数日の空白は、前後の値を直線でつないだ推定です。</p>
 {keys}
 {chart}
 <details><summary>貯水率を表で見る</summary>
@@ -584,6 +616,7 @@ def render(data: dict, now: datetime) -> str:
 <footer>
 <p>{now:%Y-%m-%d %H:%M} 更新。個人の非公式サイトで、福岡市・気象庁とは関係ありません。内容の正確さは保証しません。</p>
 <p>出典: 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
+出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
 <p>計算のコード・発行した予想・答え合わせの結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
 </footer>

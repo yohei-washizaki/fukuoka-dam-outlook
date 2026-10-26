@@ -35,12 +35,13 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
 
 ## 公表値と推定値
 
-- `data/normalized/dam_storage.csv` は福岡市水道局が公表した値です（「きょうのダム状況（テキスト版）」「浄水日報」）。
+- `data/normalized/dam_storage.csv` は福岡市水道局が公表した値です（「きょうのダム状況（テキスト版）」「浄水日報」と、BODIK の「福岡市関連９ダム貯水量」の毎日9時の値）。
 - `data/normalized/dam_storage_chart.csv` は、市議会への報告資料「水事情について」のグラフから読み取った推定値で、公表値ではありません（誤差は2万m³程度）。
 - `data/forecasts/` と `data/verification/` は、このプロジェクト独自の計算です。
 
 ## 出典
 
 - 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」
+- 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成
 - 気象庁ホームページ（https://www.jma.go.jp/）の1か月予報・週間予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任はこのプロジェクトにあります。
 - 福岡地区水道企業団などの発表（`data/curated/events.csv` の `source` 列）
