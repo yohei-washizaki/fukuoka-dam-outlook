@@ -1,0 +1,227 @@
+{
+ "model": "baseline_norain",
+ "model_version": "1",
+ "issued_at": "2026-10-26T20:55:20+09:00",
+ "base_date": "2026-10-26",
+ "target": "total_storage_m3",
+ "inputs_sha256": "2157efb2484b9d7d5475ac14456788a3c08420a51b14bb6bcd64ed7efd6f49c3",
+ "inputs": {
+  "base_date": "2026-10-26",
+  "base_storage_m3": 32236000,
+  "capacity_m3": 78347000,
+  "daily_changes": [
+   {
+    "date": "2026-10-19",
+    "change_m3": -268000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-20",
+    "change_m3": -198000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-21",
+    "change_m3": -152000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-22",
+    "change_m3": -16000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-23",
+    "change_m3": -164000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-26",
+    "change_m3": 1181000,
+    "dry": false,
+    "dry_source": "nippou"
+   }
+  ],
+  "rate_pool": "dry_days"
+ },
+ "params": {
+  "rate_m3_per_day": -198000,
+  "window_days": 14,
+  "min_dry_days": 3
+ },
+ "forecast": [
+  {
+   "date": "2026-10-27",
+   "horizon_days": 1,
+   "storage_m3": 32038000,
+   "storage_pct": 40.89
+  },
+  {
+   "date": "2026-10-28",
+   "horizon_days": 2,
+   "storage_m3": 31840000,
+   "storage_pct": 40.64
+  },
+  {
+   "date": "2026-10-29",
+   "horizon_days": 3,
+   "storage_m3": 31642000,
+   "storage_pct": 40.39
+  },
+  {
+   "date": "2026-10-30",
+   "horizon_days": 4,
+   "storage_m3": 31444000,
+   "storage_pct": 40.13
+  },
+  {
+   "date": "2026-10-31",
+   "horizon_days": 5,
+   "storage_m3": 31246000,
+   "storage_pct": 39.88
+  },
+  {
+   "date": "2026-11-01",
+   "horizon_days": 6,
+   "storage_m3": 31048000,
+   "storage_pct": 39.63
+  },
+  {
+   "date": "2026-11-02",
+   "horizon_days": 7,
+   "storage_m3": 30850000,
+   "storage_pct": 39.38
+  },
+  {
+   "date": "2026-11-03",
+   "horizon_days": 8,
+   "storage_m3": 30652000,
+   "storage_pct": 39.12
+  },
+  {
+   "date": "2026-11-04",
+   "horizon_days": 9,
+   "storage_m3": 30454000,
+   "storage_pct": 38.87
+  },
+  {
+   "date": "2026-11-05",
+   "horizon_days": 10,
+   "storage_m3": 30256000,
+   "storage_pct": 38.62
+  },
+  {
+   "date": "2026-11-06",
+   "horizon_days": 11,
+   "storage_m3": 30058000,
+   "storage_pct": 38.37
+  },
+  {
+   "date": "2026-11-07",
+   "horizon_days": 12,
+   "storage_m3": 29860000,
+   "storage_pct": 38.11
+  },
+  {
+   "date": "2026-11-08",
+   "horizon_days": 13,
+   "storage_m3": 29662000,
+   "storage_pct": 37.86
+  },
+  {
+   "date": "2026-11-09",
+   "horizon_days": 14,
+   "storage_m3": 29464000,
+   "storage_pct": 37.61
+  },
+  {
+   "date": "2026-11-10",
+   "horizon_days": 15,
+   "storage_m3": 29266000,
+   "storage_pct": 37.35
+  },
+  {
+   "date": "2026-11-11",
+   "horizon_days": 16,
+   "storage_m3": 29068000,
+   "storage_pct": 37.1
+  },
+  {
+   "date": "2026-11-12",
+   "horizon_days": 17,
+   "storage_m3": 28870000,
+   "storage_pct": 36.85
+  },
+  {
+   "date": "2026-11-13",
+   "horizon_days": 18,
+   "storage_m3": 28672000,
+   "storage_pct": 36.6
+  },
+  {
+   "date": "2026-11-14",
+   "horizon_days": 19,
+   "storage_m3": 28474000,
+   "storage_pct": 36.34
+  },
+  {
+   "date": "2026-11-15",
+   "horizon_days": 20,
+   "storage_m3": 28276000,
+   "storage_pct": 36.09
+  },
+  {
+   "date": "2026-11-16",
+   "horizon_days": 21,
+   "storage_m3": 28078000,
+   "storage_pct": 35.84
+  },
+  {
+   "date": "2026-11-17",
+   "horizon_days": 22,
+   "storage_m3": 27880000,
+   "storage_pct": 35.59
+  },
+  {
+   "date": "2026-11-18",
+   "horizon_days": 23,
+   "storage_m3": 27682000,
+   "storage_pct": 35.33
+  },
+  {
+   "date": "2026-11-19",
+   "horizon_days": 24,
+   "storage_m3": 27484000,
+   "storage_pct": 35.08
+  },
+  {
+   "date": "2026-11-20",
+   "horizon_days": 25,
+   "storage_m3": 27286000,
+   "storage_pct": 34.83
+  },
+  {
+   "date": "2026-11-21",
+   "horizon_days": 26,
+   "storage_m3": 27088000,
+   "storage_pct": 34.57
+  },
+  {
+   "date": "2026-11-22",
+   "horizon_days": 27,
+   "storage_m3": 26890000,
+   "storage_pct": 34.32
+  },
+  {
+   "date": "2026-11-23",
+   "horizon_days": 28,
+   "storage_m3": 26692000,
+   "storage_pct": 34.07
+  }
+ ]
+}
