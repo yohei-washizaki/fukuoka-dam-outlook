@@ -126,11 +126,12 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
     Chikugo intake restriction rate in force. It is a separate measure, so it gets
     a labelled tint instead of a second y-axis.
 
-    narrow draws the same chart in a phone-sized frame with sparser ticks, so text
-    stays readable instead of shrinking with the wide drawing.
+    narrow draws the same chart in a phone-sized frame with sparser ticks and no
+    end labels (the legend names the lines), so text stays readable instead of
+    shrinking with the wide drawing.
     """
     w, h = (360, 280) if narrow else (720, 300)
-    ml, mr, mt, mb = (34, 52, 12, 28) if narrow else (48, 64, 16, 32)
+    ml, mr, mt, mb = (34, 16, 12, 28) if narrow else (48, 64, 16, 32)
     all_pts = [p for s in series for p in s["points"]]
     if band:
         all_pts += [(d, lo) for d, lo, _ in band["points"]] + [(d, hi) for d, _, hi in band["points"]]
@@ -208,7 +209,9 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
         if s.get("markers") or len(pts) == 1:
             for d, v in pts:
                 out.append(f'<circle class="dot {s["cls"]}" cx="{x(d):.1f}" cy="{y(v):.1f}" r="{3 if narrow else 4}"/>')
-        if s.get("label", True):  # series that others continue from are named in the legend only
+        # Series that others continue from are named in the legend only, and so is every
+        # series on a phone, where end labels would take a third of the width.
+        if s.get("label", True) and not narrow:
             d, v = pts[-1]
             labels.append([y(v) + 4, x(d) + 8, s["name"]])
     # Direct labels at series ends, pushed apart vertically so they never overlap.
