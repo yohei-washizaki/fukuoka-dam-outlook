@@ -13,6 +13,7 @@
 - 第三者が計算方法と精度を確かめられるように、公開用のリポジトリ `yohei-washizaki/fukuoka-dam-outlook` に、コード・テスト・docs・`data/normalized/`・`data/forecasts/`・`data/verification/`・`events.csv`・`storage_chart_sources.csv` を書き出す（`dam_outlook.export`）。
 - 書き出さないもの: `data/raw/`、市のページの写しのテスト素材（`city_dam_text.html`・`nippou_2026_10_21.txt`。それを使うテストは公開側でスキップ）、出来事の照合メモ、`.github/`。福岡市の個別ページの URL は `https://www.city.fukuoka.lg.jp/...` に置き換える（2026-10-26 に決定。個別ページへのリンクには担当課への問い合わせが必要なため）。
 - `.github/workflows/public.yml` が、`fetch` の後と main への push の後に同期する。公開用リポジトリの書き込み専用デプロイキーを、このリポジトリの secret `PUBLIC_REPO_DEPLOY_KEY` に置く。未設定なら何もしない。
+- 2026-10-26 に public にした（https://github.com/yohei-washizaki/fukuoka-dam-outlook）。ライセンスは付けない（閲覧と検証のための実行はできるが、再利用は認めない）。気象庁の回答を見てから MIT などにするか決める。
 - 公開用リポジトリの履歴は同期コミットだけで、このリポジトリの履歴は持ち出さない（過去のコミットに `data/raw/` があるため）。
 
 ## Open
