@@ -4,6 +4,10 @@ Run: ``PYTHONPATH=src python -m dam_outlook.site`` (writes ``site/index.html``)
 
 Published values and model outputs are labelled separately on the page.
 Charts are inline SVG; a small inline script adds the hover tooltip.
+
+Rates are of the 9-dam total excluding the drought reserve (渇水対策容量分を除く),
+as the city's status page leads with; days it was not printed are estimates
+(reserve.py) and are drawn dashed. The per-dam table includes the reserve.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .forecast import load_forecasts
-from .models import THRESHOLDS_PCT, read_csv
+from .reserve import RESERVE_CAPACITY_M3
+from .models import TARGET, THRESHOLDS_PCT, load_excl, load_history, read_csv
 from .raw_store import JST
 
 SCENARIO = "scenario_jma_tercile"
@@ -55,12 +60,18 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
     forecasts = load_forecasts(forecast_dir)
 
     def latest_of(model):
-        fs = [f for f in forecasts if f["model"] == model]
+        fs = [f for f in forecasts if f["model"] == model and f.get("target") == TARGET]
         return max(fs, key=lambda f: f["issued_at"]) if fs else None
 
+    hist_total = {d: {"storage_m3": int(r["storage_m3"]), "storage_pct": float(r["storage_pct"]) if r["storage_pct"] else None,
+                      "capacity_m3": int(r["capacity_m3"]) if r["capacity_m3"] else None} for d, r in total.items()}
+    excl = {d.isoformat(): {**v, "pct": 100 * v["storage_m3"] / v["capacity_m3"]}
+            for d, v in load_excl(normalized_dir, load_history(normalized_dir, hist_total))["excl_history"].items()
+            if v["capacity_m3"]}
     return {
         "total": total,
         "latest_date": latest_date,
+        "excl": excl,
         "dams": dams,
         "scenario": latest_of(SCENARIO),
         "baseline": latest_of(BASELINE),
@@ -68,45 +79,41 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
         "summary": read_csv(verification_dir / "summary.csv"),
         "hindcast": read_csv(verification_dir / "hindcast.csv"),
         "events": read_csv(events_path),
-        "chart_pct": chart_pct(read_csv(normalized_dir / "dam_storage_chart.csv"), total),
         "p1m": [r for r in read_csv(normalized_dir / "jma_p1m.csv") if r["element"] == "降水量" and r["period"] == "P1M"],
     }
 
 
-GAP_FILL_DAYS = 3  # a gap this short between the chart readings and published values is interpolated
+def published_excl(data: dict) -> list[str]:
+    return sorted(d for d, v in data["excl"].items() if v["published"])
 
 
-def chart_pct(rows: list[dict], total: dict) -> list[tuple[str, float]]:
-    """Storage rate per date read off the city's report charts (median over reports), for dates not observed.
+def excl_lines(data: dict, start: date) -> list[dict]:
+    """The solid line of printed values and the dashed estimates around it.
 
-    A short gap up to the next published value is filled by linear interpolation,
-    so the estimate line meets the published line.
+    The status page is printed on weekdays from 2026-10-27, so the solid line
+    starts at its first day and bridges weekends; estimates fill the days
+    before it (report charts, reserve interpolation) and after its last value.
     """
-    by_date: dict[str, list[float]] = {}
-    for r in rows:
-        if r["series"] == "incl_reserve" and r["capacity_m3"] and r["date"] not in total:
-            by_date.setdefault(r["date"], []).append(100 * int(r["storage_m3"]) / int(r["capacity_m3"]))
-    est = [(d, statistics.median(v)) for d, v in sorted(by_date.items())]
-    if est:
-        d0, v0 = date.fromisoformat(est[-1][0]), est[-1][1]
-        after = [d for d in total if d > est[-1][0] and total[d]["storage_pct"]]
-        if after:
-            d1 = date.fromisoformat(min(after))
-            v1 = float(total[d1.isoformat()]["storage_pct"])
-            gap = (d1 - d0).days
-            if 1 < gap <= GAP_FILL_DAYS + 1:
-                est += [((d0 + timedelta(days=i)).isoformat(), v0 + (v1 - v0) * i / gap) for i in range(1, gap)]
-    return est
+    excl = {d: v for d, v in sorted(data["excl"].items()) if date.fromisoformat(d) >= start}
+    daily = [d for d, v in excl.items() if v["published"] and "city_status" in v.get("sources", "")]
 
+    def pts(days):
+        return [(d, excl[d]["pct"]) for d in days]
 
-def estimate_series(data: dict, start: date) -> dict | None:
-    """The dashed estimate line from start, ending on the first published value it leads into."""
-    est = [(d, v) for d, v in data["chart_pct"] if date.fromisoformat(d) >= start]
-    if not est:
-        return None
-    nxt = (date.fromisoformat(est[-1][0]) + timedelta(days=1)).isoformat()
-    end = [(nxt, float(data["total"][nxt]["storage_pct"]))] if nxt in data["total"] else []
-    return {"name": "推定値", "cls": "s1 est", "points": est + end, "hover_last": not end, "dash": True, "label": False}
+    def est(days, **kw):
+        return {"name": "推定値", "cls": "s1 est", "points": pts(days), "dash": True, "label": False, **kw}
+
+    if not daily:
+        return [est(list(excl), end_marker=True)] if excl else []
+    lines = []
+    before = [d for d in excl if d <= daily[0]]
+    after = [d for d in excl if d >= daily[-1]]
+    if len(before) > 1:
+        lines.append(est(before, hover_last=False))  # it ends on the first printed value
+    if len(after) > 1:
+        lines.append(est(after, hover_first=False))
+    lines.append({"name": "実績", "cls": "s1", "points": pts(daily), "end_marker": True, "label": False})
+    return lines
 
 
 # ---------------------------------------------------------------- charts
@@ -228,7 +235,8 @@ def line_chart(chart_id: str, series: list[dict], band: dict | None, y_label: st
     # Hover data: one row per date with every series value.
     rows: dict[str, dict] = {}
     for s in series:
-        for d, v in s["points"] if s.get("hover_last", True) else s["points"][:-1]:
+        pts = s["points"] if s.get("hover_last", True) else s["points"][:-1]
+        for d, v in pts if s.get("hover_first", True) else pts[1:]:
             rows.setdefault(d, {})[s["name"]] = f"{v:.2f}%"
     if band:
         for d, lo, hi in band["points"]:
@@ -264,14 +272,6 @@ def legend(items: list[tuple[str, str, bool]], restriction: bool = False) -> str
 # ---------------------------------------------------------------- sections
 
 
-def _pct_series(total: dict, start: date | None = None) -> list[tuple[str, float]]:
-    return [
-        (d, float(r["storage_pct"]))
-        for d, r in sorted(total.items())
-        if r["storage_pct"] and (start is None or date.fromisoformat(d) >= start)
-    ]
-
-
 def md(d: str) -> str:
     return f"{int(d[5:7])}/{int(d[8:10])}"
 
@@ -305,27 +305,36 @@ def no_rain_phrase(now_pct: float, v: float) -> list[str]:
     return ["雨が降らなければ、", f"{value}です。"]
 
 
+def base_pct(f: dict) -> float:
+    """The forecast's starting point: storage excluding the reserve on its base date."""
+    return 100 * f["inputs"]["base_excl_storage_m3"] / f["inputs"]["capacity_m3"]
+
+
+DELTA_MAX_DAYS = 7
+
+
 def section_now(data: dict) -> str:
-    total, d = data["total"], data["latest_date"]
-    if not d:
+    pub = published_excl(data)
+    if not pub:
         return '<section><h2>いま</h2><p class="muted">データがまだありません。</p></section>'
-    cur = total[d]
-    # Change since the previous published day (none on weekends, so not always yesterday).
-    prev_d = max((p for p in total if p < d and total[p]["storage_pct"]), default=None)
+    d = pub[-1]
+    cur = data["excl"][d]
+    # Change since the previous printed day (none on weekends, so not always yesterday);
+    # left out when that is weeks back (a report before the status page was fetched).
     delta = ""
-    if prev_d:
-        dv = float(cur["storage_pct"]) - float(total[prev_d]["storage_pct"])
-        dm = int(cur["storage_m3"]) - int(total[prev_d]["storage_m3"])
-        delta = f"<br>前回（{md(prev_d)}）から {dv:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
+    if len(pub) > 1 and (date.fromisoformat(d) - date.fromisoformat(pub[-2])).days <= DELTA_MAX_DAYS:
+        prev = data["excl"][pub[-2]]
+        dm = cur["storage_m3"] - prev["storage_m3"]
+        delta = f"<br>前回（{md(pub[-2])}）から {cur['pct'] - prev['pct']:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
     tiles = [f"""<div class="stat fact"><div class="stat-label">現在の貯水率 <span class="badge fact">公表値</span></div>
-<div class="stat-num">{float(cur["storage_pct"]):.2f}%</div>
-<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}{delta}</div></div>"""]
+<div class="stat-num">{cur["pct"]:.2f}%</div>
+<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}（渇水対策容量分を除く）{delta}</div></div>"""]
 
     sc, bl = data["scenario"], data["baseline"]
-    now_pct = float(cur["storage_pct"])
     head = ""
     last = sc["forecast"][-1] if sc else None
     bl_last = bl["forecast"][-1] if bl else None
+    now_pct = base_pct(sc or bl) if sc or bl else None
     if last:
         when = f'{weeks_or_days(last["horizon_days"])}（{md(last["date"])}）'
         head = phrases(f"{when}の", "貯水率は、", *trend_phrase(now_pct, last["storage_pct_p50"]))
@@ -343,11 +352,16 @@ def section_now(data: dict) -> str:
         f'<td class="num">{f"{int(r["change_m3"]) / 10000:+,.1f}万m³" if r["change_m3"] else "—"}</td></tr>'
         for r in data["dams"] if r["storage_pct"]
     )
+    incl = f"渇水対策容量分を含む9ダム合計は{cur['incl_storage_pct']:.2f}%（{md(d)}）です。" if cur.get("incl_storage_pct") else ""
     return f"""<section>
 {f'<p class="headline">{head}</p>' if head else ""}
 <div class="stats">{"".join(tiles)}</div>
+<details><summary>渇水対策容量とは</summary>
+<p class="note">ふだんの渇水では使わずに残しておく、異常渇水のときのための水の備蓄です。五ケ山ダムと江川ダムにあり、容量は合わせて{fmt_m3(RESERVE_CAPACITY_M3)}です。このサイトの貯水率は、福岡市の「きょうのダム状況」と同じく、これを除いた値です。{incl}</p>
+</details>
 <details><summary>ダム別の貯水率</summary>
 <table><thead><tr><th>ダム</th><th>貯水率</th><th>貯水量</th><th>利水容量</th><th>前日比</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">ダム別の値は渇水対策容量分を含みます（{md(data["latest_date"]) if data["latest_date"] else ""} 9時）。</p>
 </details>
 </section>"""
 
@@ -359,27 +373,18 @@ def section_outlook(data: dict) -> str:
         return '<section><h2>予想</h2><p class="muted">予想はまだ発行されていません。</p></section>'
     cap = f["inputs"]["capacity_m3"]
     base = date.fromisoformat(f["base_date"])
-    hist = _pct_series(data["total"], base - timedelta(days=28))
-    series = [{"name": "実績", "cls": "s1", "points": hist, "end_marker": True, "label": False}]
-    est = estimate_series(data, base - timedelta(days=28))
-    if est:
-        series.insert(0, est)
+    start_pt = [(f["base_date"], base_pct(f))]
+    series = excl_lines(data, base - timedelta(days=28))
     band = None
     if sc:
         series.append({"name": "予想", "cls": "s2", "dash": False,
-                       "points": [(f["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct_p50"]) for p in sc["forecast"]]})
+                       "points": start_pt + [(p["date"], p["storage_pct_p50"]) for p in sc["forecast"]]})
         band = {"name": "80%の範囲", "cls": "s2",
                 "points": [(p["date"], 100 * p["storage_m3_p10"] / cap, 100 * p["storage_m3_p90"] / cap) for p in sc["forecast"]]}
     if bl:
         series.append({"name": "雨なし", "cls": "s3", "dash": True,
-                       "points": [(bl["base_date"], hist[-1][1])] + [(p["date"], p["storage_pct"]) for p in bl["forecast"]]})
-    keys = [("実績", "s1", False)]
-    if est:
-        keys.append(("推定値", "s1 est", True))
-    if sc:
-        keys.append(("予想", "s2", False))
-    if bl:
-        keys.append(("雨なし", "s3", True))
+                       "points": [(bl["base_date"], base_pct(bl))] + [(p["date"], p["storage_pct"]) for p in bl["forecast"]]})
+    keys = line_keys(series)
     chart = chart_pair("outlook", series, band, "9ダム合計の貯水率の予想",
                        restrictions=data["events"], fact_end=data["latest_date"])
 
@@ -408,7 +413,7 @@ def section_outlook(data: dict) -> str:
 <div><h3>貯水率の予想</h3><table><thead><tr><th></th><th class="num">中央値</th><th class="num">80%の範囲</th><th class="num">雨なし</th></tr></thead><tbody>{rows}</tbody></table></div>
 <div><h3>貯水率が下回る確率</h3><table><thead><tr><th></th>{head}</tr></thead><tbody>{body}</tbody></table></div>
 </div>
-<p class="note">{p1m_text}。貯水率は利水容量 {fmt_m3(cap)} に対する割合です。</p>
+<p class="note">{p1m_text}。貯水率は、渇水対策容量分を除く利水容量 {fmt_m3(cap)} に対する割合です。</p>
 </details>"""
 
     issued = datetime.fromisoformat(f["issued_at"]).astimezone(JST)
@@ -451,9 +456,10 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
 <li>雨で増える分は、{ym(pr["training_first"])}以降の貯水量と雨量（{pr["training_days"]:,}日分）から最小二乗法で推定し、予想のたびに推定し直します。今回の推定では、雨1mmあたり、その日から3日後までに計{man(quick)}、その後{tau:.0f}日ほどかけてさらに{man(slow)}増えます。貯水量が利水容量の{100 * pr["full_share"]:.0f}%を超えている日は、あふれる分があるため推定に使いません。</li>
 <li>水準は、直近28日の実際の増減から雨の分を引いたものの中央値で、今回は1日あたり{man(abs(pr["level_m3_per_day"]))}{"減" if pr["level_m3_per_day"] < 0 else "増"}です。取水制限・節水・導水の効果はここに入ります。</li>
 <li>この先の雨には、2006年以降の他の年の同じ時期（前後{pr["analog_half_window_days"]}日）に実際に降った28日間の雨（{pr["analog_windows_n"]:,}通り）を使います。28日間の雨の合計で少ない・平年並・多いの3つに分け、気象庁1か月予報の確率で重み付けします。</li>
+<li>ここまでは実際にたまっている水の量（渇水対策容量分を含む）で計算し、最後に渇水対策容量分を引きます。今回は{md(sc["inputs"]["reserve_date"])}時点の{man(sc["inputs"]["reserve_m3"])}で、予想期間中は変わらないとしています。</li>
 <li>水準が今後ずれる分として、1日あたり平均0・標準偏差{man(pr["level_sigma_m3_per_day"])}のぶれを加え、{pr["n_sims"]:,}通り計算します。その中央値、10〜90%の範囲（80%の範囲）、閾値を下回る割合を表に示しています。</li>
 </ol>
-<p class="note">予想に入っていないこと: 取水制限の強化・解除などで水準が急に変わること、予想期間中の利水容量の切り替え。</p>""")
+<p class="note">予想に入っていないこと: 取水制限の強化・解除などで水準が急に変わること、渇水対策容量分の取り崩しや回復、予想期間中の利水容量の切り替え。</p>""")
     hc = {(r["model"], r["horizon_days"]): r for r in hindcast
           if (r["model"], r["model_version"]) in ((sc["model"], sc["model_version"]), (bl["model"], bl["model_version"]) if bl else (None, None))}
     hs = [h for h in ("7", "14", "28") if (sc["model"], h) in hc]
@@ -474,22 +480,28 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
     return "\n".join(parts)
 
 
+def line_keys(series: list[dict]) -> list[tuple[str, str, bool]]:
+    keys = {s["name"]: (s["name"], s["cls"], bool(s.get("dash"))) for s in series}
+    order = ("実績", "推定値", "予想", "雨なし")
+    return [keys[n] for n in order if n in keys]
+
+
 def section_history(data: dict) -> str:
-    if not data["latest_date"]:
+    if not data["excl"]:
         return ""
-    start = date.fromisoformat(data["latest_date"]) - timedelta(days=HISTORY_DAYS)
-    pts = _pct_series(data["total"], start)
-    est = estimate_series(data, start)
-    series = [{"name": "実績", "cls": "s1", "points": pts, "end_marker": True}]
-    if est:
-        series.insert(0, est)
+    end = max(data["excl"])
+    start = date.fromisoformat(end) - timedelta(days=HISTORY_DAYS)
+    series = excl_lines(data, start)
     chart = chart_pair("history", series, None, "9ダム合計の貯水率の推移",
-                       restrictions=data["events"], fact_end=data["latest_date"])
-    keys = legend([("実績", "s1", False)] + ([("推定値", "s1 est", True)] if est else []), restriction=True)
+                       restrictions=data["events"], fact_end=end)
+    keys = legend(line_keys(series), restriction=True)
+    # Days with a printed value, or a published total the estimate is made from.
+    days = sorted((d for d, v in data["excl"].items() if v["published"] or d in data["total"]), reverse=True)
     rows = "".join(
-        f'<tr><td>{esc(d)}</td><td class="num">{float(r["storage_pct"]):.2f}%</td><td class="num">{fmt_m3(r["storage_m3"])}</td>'
-        f'<td class="num">{fmt_m3(r["capacity_m3"])}</td><td>{esc(r["sources"])}</td></tr>'
-        for d, r in sorted(data["total"].items(), reverse=True)
+        f'<tr><td>{esc(d)}</td><td class="num">{v["pct"]:.2f}%</td><td class="num">{fmt_m3(v["storage_m3"])}</td>'
+        f'<td class="num">{fmt_m3(v["capacity_m3"])}</td>'
+        f'<td>{esc(v["sources"]) if v["published"] else "推定（" + esc(data["total"][d]["sources"]) + "）"}</td></tr>'
+        for d in days for v in [data["excl"][d]]
     )
     return f"""<section>
 <h2>推移 <span class="badge fact">公表値</span></h2>
@@ -497,7 +509,7 @@ def section_history(data: dict) -> str:
 {keys}
 <details><summary>貯水率を表で見る</summary>
 <table><thead><tr><th>日付</th><th>貯水率</th><th>貯水量</th><th>利水容量</th><th>出典</th></tr></thead><tbody>{rows}</tbody></table>
-<p class="note">利水容量は季節で変わるため、貯水量が増えても貯水率が下がる日があります（例: 2026-10-21 に南畑ダムの容量が 365万→512万m³）。</p>
+<p class="note">推定は、公表された合計（渇水対策容量分を含む）から、前後の公表日の渇水対策容量分（含む − 除く）を補間して引いた値です。利水容量は季節で変わるため、貯水量が増えても貯水率が下がる日があります（例: 2026-10-21 に南畑ダムの容量が 365万→512万m³）。</p>
 </details>
 {restriction_details(data["events"])}
 </section>"""
@@ -618,7 +630,7 @@ def render(data: dict, now: datetime) -> str:
 {body}
 <footer>
 <p>{now:%Y-%m-%d %H:%M} 更新。福岡市水道局・気象庁とは関係ありません。内容の正確さは保証しません。</p>
-<p>出典: 福岡市水道局「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
+<p>出典: 福岡市水道局「きょうのダム状況」「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
 <p>計算のコード・発行した予想・答え合わせの結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>

@@ -12,7 +12,7 @@ def fc(model, base, rows, capacity=1000):
 
 class VerifyTest(unittest.TestCase):
     def setUp(self):
-        self.actual = {"2026-10-24": 300, "2026-10-25": 250}
+        self.actual = {"total_storage_m3": {"2026-10-24": 300, "2026-10-25": 250}}
         self.forecasts = [
             fc("baseline_norain", "2026-10-23", [
                 {"date": "2026-10-24", "horizon_days": 1, "storage_m3": 280},
@@ -39,6 +39,14 @@ class VerifyTest(unittest.TestCase):
         # actual 300 < 350 (35%) -> outcome 1; 300 >= 300 (30%) -> outcome 0
         self.assertEqual((s1["brier_35"], s1["brier_30"]), (0.01, 0.04))
         self.assertEqual(s2["brier_25"], 0.01)  # 250 is not below 250
+
+    def test_scored_against_the_forecast_target(self):
+        excl = [{**f, "model_version": "2", "target": "storage_excl_reserve_m3"} for f in self.forecasts]
+        actual = {**self.actual, "storage_excl_reserve_m3": {"2026-10-25": 260}}
+        rows = v.score(self.forecasts + excl, actual)
+        self.assertEqual(len(rows), 6)
+        v2 = [r for r in rows if r["model_version"] == "2"]
+        self.assertEqual([(r["date"], r["actual_m3"]) for r in v2], [("2026-10-25", 260)] * 2)
 
     def test_summary_skill_against_baseline(self):
         summary = v.summarize(v.score(self.forecasts, self.actual))

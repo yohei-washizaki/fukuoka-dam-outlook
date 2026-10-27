@@ -10,6 +10,10 @@ into the analog windows. Past 1-month forecasts are not stored, so the
 scenario model uses equal tercile weights. The no-rain baseline judges dry
 days from the calendar-day AMeDAS mean instead of the daily report.
 
+Forecasts are scored on the storage excluding the drought reserve (the
+forecast target from v2, reserve.py); the charts give it from 2025-04, so
+base dates start there even though the models train on earlier years.
+
 Writes ``data/verification/hindcast.csv`` (rebuilt every run). Hindcasts are
 evaluation only; they are not issued forecasts and are not stored as such.
 """
@@ -63,13 +67,13 @@ def _quantile_points(row: dict) -> list[tuple[float, float]]:
 
 def hindcast(normalized_dir: Path, start: date = START, step: int = STEP_DAYS) -> list[dict]:
     obs = load_observations(normalized_dir)
-    hist = obs["history"]
+    hist, excl = obs["history"], obs["excl_history"]
     if not hist:
         return []
     bases = []
     d = start
     while d + timedelta(days=max(HORIZONS)) <= max(hist):
-        if d in hist and all(d + timedelta(days=h) in hist for h in HORIZONS):
+        if d in hist and d in excl and all(d + timedelta(days=h) in excl for h in HORIZONS):
             bases.append(d)
         d += timedelta(days=step)
     scores: dict[tuple, list[tuple[float, float, bool]]] = {}
@@ -84,7 +88,7 @@ def hindcast(normalized_dir: Path, start: date = START, step: int = STEP_DAYS) -
                 h = row["horizon_days"]
                 if h not in HORIZONS:
                     continue
-                actual = hist[base + timedelta(days=h)][0]
+                actual = excl[base + timedelta(days=h)]["storage_m3"]
                 qs = _quantile_points(row)
                 pinball = statistics.fmean(max(q * (actual - x), (q - 1) * (actual - x)) for q, x in qs)
                 err = qs[1][1] - actual

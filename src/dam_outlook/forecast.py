@@ -20,7 +20,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from .models import MODELS, load_observations
+from .models import MODELS, TARGET, load_observations
 from .raw_store import JST, stamp
 
 
@@ -58,7 +58,7 @@ def issue(normalized_dir: Path, forecast_dir: Path, now: datetime) -> list[Path]
             "model_version": version,
             "issued_at": now.isoformat(timespec="seconds"),
             "base_date": base.isoformat(),
-            "target": "total_storage_m3",
+            "target": TARGET,
             "base_sources": obs["total"][base.isoformat()]["sources"],
             "inputs_sha256": inputs_sha256(result["inputs"]),
             **result,

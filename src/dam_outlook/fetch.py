@@ -2,7 +2,7 @@
 
 Run: ``PYTHONPATH=src python -m dam_outlook.fetch``
 
-Sources whose past values cannot be re-fetched (the city text page, the daily
+Sources whose past values cannot be re-fetched (the city text and status pages, the daily
 water report PDFs, the hourly dam CSV that covers only recent weeks, AMeDAS
 point data kept for about ten days) are fetched every
 run, and missing recent dates are backfilled while upstream still has them.
@@ -28,6 +28,9 @@ USER_AGENT = "dam-outlook/0.1 (personal research; daily fetch)"
 TIMEOUT = 30
 
 CITY_DAM_TEXT_URL = "https://www.city.fukuoka.lg.jp/..."
+# きょうのダム状況: the 9-dam total with and without the drought reserve (渇水対策容量),
+# weekdays 9:00, current values only.
+CITY_DAM_STATUS_URL = "https://www.city.fukuoka.lg.jp/..."
 CITY_NIPPOU_URL = (
     "https://www.city.fukuoka.lg.jp/..."
     "nippou_{d:%Y_%m_%d}.pdf"
@@ -138,6 +141,9 @@ class Fetcher:
 
     def fetch_city_dam_text(self):
         return self.fetch_snapshot("city_dam_text", CITY_DAM_TEXT_URL, "001", "html")
+
+    def fetch_city_dam_status(self):
+        return self.fetch_snapshot("city_dam_status", CITY_DAM_STATUS_URL, "002", "html")
 
     def fetch_bodik_dam_hourly(self):
         return self.fetch_snapshot("bodik_dam_hourly", BODIK_DAM_HOURLY_URL, "dam_hourly", "csv")
@@ -316,6 +322,7 @@ class Fetcher:
     def run(self, only: set[str] | None = None) -> None:
         steps = {
             "city_dam_text": self.fetch_city_dam_text,
+            "city_dam_status": self.fetch_city_dam_status,
             "city_nippou": self.fetch_city_nippou,
             "bodik_dam_hourly": self.fetch_bodik_dam_hourly,
             "jma_p1m": self.fetch_jma_p1m,

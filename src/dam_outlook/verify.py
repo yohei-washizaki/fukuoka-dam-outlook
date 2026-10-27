@@ -1,4 +1,7 @@
-"""Score issued forecasts against observed total storage.
+"""Score issued forecasts against the published storage they predicted.
+
+Forecasts up to v1 predicted the total storage; from v2 they predict the total
+excluding the drought reserve, which is scored only on days it was printed.
 
 Run: ``PYTHONPATH=src python -m dam_outlook.verify``
 
@@ -17,7 +20,7 @@ import sys
 from pathlib import Path
 
 from .forecast import load_forecasts
-from .models import THRESHOLDS_PCT, read_csv
+from .models import TARGET, THRESHOLDS_PCT, read_csv
 from .normalize import write_csv
 
 BASELINE = "baseline_norain"
@@ -34,20 +37,25 @@ SUMMARY_COLUMNS = [
 ]
 
 
-def actual_storage(normalized_dir: Path) -> dict[str, int]:
+def actual_storage(normalized_dir: Path) -> dict[str, dict[str, int]]:
+    """Published values per forecast target and date."""
     return {
-        r["date"]: int(r["storage_m3"])
-        for r in read_csv(normalized_dir / "dam_storage.csv")
-        if r["dam_id"] == "total"
+        "total_storage_m3": {
+            r["date"]: int(r["storage_m3"])
+            for r in read_csv(normalized_dir / "dam_storage.csv")
+            if r["dam_id"] == "total"
+        },
+        TARGET: {r["date"]: int(r["storage_m3"]) for r in read_csv(normalized_dir / "dam_storage_excl.csv")},
     }
 
 
-def score(forecasts: list[dict], actual: dict[str, int]) -> list[dict]:
+def score(forecasts: list[dict], actual: dict[str, dict[str, int]]) -> list[dict]:
     rows = []
     for f in forecasts:
         capacity = f.get("inputs", {}).get("capacity_m3")
+        target = actual.get(f.get("target", "total_storage_m3"), {})
         for p in f["forecast"]:
-            a = actual.get(p["date"])
+            a = target.get(p["date"])
             if a is None:
                 continue
             pred = p.get("storage_m3", p.get("storage_m3_p50"))

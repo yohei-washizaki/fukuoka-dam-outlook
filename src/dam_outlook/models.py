@@ -18,6 +18,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
+from . import reserve
+
+# What the forecasts predict: the 9-dam total excluding the drought reserve (from v2).
+TARGET = "storage_excl_reserve_m3"
 HORIZON_DAYS = 28
 RATE_WINDOW_DAYS = 14
 MIN_DRY_DAYS = 3
@@ -73,18 +77,28 @@ def load_observations(normalized_dir: Path) -> dict:
         for r in read_csv(normalized_dir / "jma_p1m.csv")
         if r["element"] == "降水量" and r["period"] == "P1M"
     ]
+    history = load_history(normalized_dir, total)
     return {
         "total": total,
         "dam_precip": dam_precip,
         "amedas_9to9": amedas,
         "p1m_precip": p1m,
-        "history": load_history(normalized_dir, total),
+        "history": history,
         "rain_daily": load_rain_daily(normalized_dir),
+        **load_excl(normalized_dir, history),
     }
 
 
+def load_excl(normalized_dir: Path, history: dict[date, tuple[int, int | None]]) -> dict:
+    """Published totals excluding the drought reserve, the reserve anchors, and the daily series (reserve.py)."""
+    pub = reserve.published(read_csv(normalized_dir / "dam_storage_excl.csv"))
+    anch = reserve.anchors(pub, read_csv(normalized_dir / "dam_storage_chart.csv"), history)
+    return {"excl_published": pub, "reserve_anchors": anch, "excl_history": reserve.history(history, pub, anch)}
+
+
 def load_history(normalized_dir: Path, total: dict[str, dict]) -> dict[date, tuple[int, int | None]]:
-    """Total storage and capacity per day: chart readings (median across reports), published values win."""
+    """Total storage (including the drought reserve) and capacity per day: chart readings
+    (median across reports), published values win."""
     readings: dict[str, list[float]] = {}
     capacity: dict[str, int] = {}
     for r in read_csv(normalized_dir / "dam_storage_chart.csv"):
@@ -171,25 +185,62 @@ def rate_pool(changes: list[dict]) -> tuple[list[int], str]:
     return [c["change_m3"] for c in changes], "all_days"
 
 
+def excl_base(obs: dict, base: date) -> dict | None:
+    """Storage excluding the drought reserve on the base date, and the reserve held for the horizon.
+
+    The models move the total storage (the water itself); the forecast of the
+    excluded storage is that minus the reserve, which is assumed to stay as on
+    the base date. The base value is the printed one when there is one, else
+    the total minus the latest reserve anchor up to the base date.
+    """
+    cur = obs["total"].get(base.isoformat())
+    if cur is None:
+        return None
+    capacity = cur["capacity_m3"] or _capacity_from_pct(cur)
+    pub = obs["excl_published"].get(base)
+    if pub:
+        excl, anchor = pub["storage_m3"], {"date": base, "source": pub["sources"]}
+    else:
+        anchor = reserve.reserve_on(obs["reserve_anchors"], base, until=base)
+        if anchor is None:
+            return None
+        excl = max(cur["storage_m3"] - anchor["reserve_m3"], 0)
+    return {
+        "base_excl_storage_m3": excl,
+        "reserve_m3": cur["storage_m3"] - excl,
+        "reserve_date": anchor["date"].isoformat(),
+        "reserve_source": anchor["source"],
+        "capacity_m3": capacity - reserve.RESERVE_CAPACITY_M3 if capacity else None,
+        "incl_capacity_m3": capacity,
+    }
+
+
+def _excl(total_m3: float, ex: dict) -> float:
+    """Total storage to storage excluding the reserve, within [0, capacity]."""
+    return min(max(total_m3 - ex["reserve_m3"], 0), ex["capacity_m3"] or float("inf"))
+
+
 def baseline_norain(obs: dict, base: date, as_of: datetime | None = None, horizon: int = HORIZON_DAYS) -> dict | None:
     """No-rain baseline: extrapolate the recent dry-day decline of total storage.
 
     rate = median daily change over dry days in the last RATE_WINDOW_DAYS
     (all days if fewer than MIN_DRY_DAYS are dry), capped at 0 so the
-    baseline never assumes inflow. Storage is floored at 0.
+    baseline never assumes inflow. The reserve is subtracted (excl_base) and
+    storage is floored at 0.
     """
     cur = obs["total"].get(base.isoformat())
-    if cur is None:
+    ex = excl_base(obs, base)
+    if cur is None or ex is None:
         return None
     changes = daily_changes(obs, base, RATE_WINDOW_DAYS)
     pool, pool_name = rate_pool(changes)
     if not pool:
         return None
     rate = min(statistics.median(pool), 0)
-    capacity = cur["capacity_m3"] or _capacity_from_pct(cur)
+    capacity = ex["capacity_m3"]
     series = []
     for h in range(1, horizon + 1):
-        s = max(cur["storage_m3"] + rate * h, 0)
+        s = _excl(cur["storage_m3"] + rate * h, ex)
         series.append(
             {
                 "date": (base + timedelta(days=h)).isoformat(),
@@ -202,7 +253,7 @@ def baseline_norain(obs: dict, base: date, as_of: datetime | None = None, horizo
         "inputs": {
             "base_date": base.isoformat(),
             "base_storage_m3": cur["storage_m3"],
-            "capacity_m3": capacity,
+            **ex,
             "daily_changes": changes,
             "rate_pool": pool_name,
         },
@@ -350,7 +401,7 @@ def _tercile_weights(windows: list[dict], weights: dict[str, float]) -> list[flo
 
 
 def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = HORIZON_DAYS) -> dict | None:
-    """Probabilistic outlook of total storage with rain from past years, weighted by the JMA terciles.
+    """Probabilistic outlook of storage excluding the drought reserve, with rain from past years, weighted by the JMA terciles.
 
     The storage model is fitted on the history up to the base date
     (fit_storage_model). Each simulation draws one past rain sequence of the
@@ -358,12 +409,15 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
     forecast's tercile for that sequence's total (equal without a forecast),
     and one level offset from N(0, sigma), where sigma is how much the level
     moved over 28 days in the history. Days already observed after the base
-    date use the observed rain. Storage is capped to [0, capacity].
+    date use the observed rain. Total storage is capped to [0, capacity];
+    the reserve is then subtracted (excl_base).
     """
     cur = obs["total"].get(base.isoformat())
-    if cur is None:
+    ex = excl_base(obs, base)
+    if cur is None or ex is None:
         return None
-    capacity = cur["capacity_m3"] or _capacity_from_pct(cur)
+    total_capacity = ex["incl_capacity_m3"]
+    capacity = ex["capacity_m3"]
     fit = fit_storage_model(obs, base)
     rain = obs["rain_daily"]
     if fit is None:
@@ -383,7 +437,7 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
     inputs = {
         "base_date": base.isoformat(),
         "base_storage_m3": s0,
-        "capacity_m3": capacity,
+        **ex,
         "training_sha256": fit["training_sha256"],
         "slow_state_mm": round(fit["slow_state"][base], 4),
         "observed_rain_mm": recent_rain,
@@ -412,8 +466,8 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
             t = base + timedelta(days=h)
             b = b * decay + rain_at(t - timedelta(days=QUICK_LAGS)) / SLOW_TAU_DAYS
             change = level + sum(q * rain_at(t - timedelta(days=j)) for j, q in enumerate(quick)) + slow_coef * b
-            s = min(max(s + change, 0), capacity or float("inf"))
-            path.append(s)
+            s = min(max(s + change, 0), total_capacity or float("inf"))
+            path.append(_excl(s, ex))
         paths.append(path)
 
     series = []
@@ -451,6 +505,6 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
 
 # name -> (version, function). Bump the version whenever a model's behavior changes.
 MODELS: dict[str, tuple[str, Callable[[dict, date, datetime], dict | None]]] = {
-    "baseline_norain": ("1", baseline_norain),
-    "scenario_jma_tercile": ("1", scenario_jma_tercile),
+    "baseline_norain": ("2", baseline_norain),
+    "scenario_jma_tercile": ("2", scenario_jma_tercile),
 }

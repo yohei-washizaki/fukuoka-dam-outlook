@@ -35,6 +35,7 @@ INCLUDE = [
 EXCLUDE = {
     "tests/fixtures/city_dam_text.html",  # copies of city pages
     "tests/fixtures/nippou_2026_10_21.txt",
+    "tests/fixtures/city_dam_status.html",
     "src/dam_outlook/assets/public_README.md",  # becomes README.md
 }
 README = "src/dam_outlook/assets/public_README.md"

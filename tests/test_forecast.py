@@ -5,9 +5,10 @@ import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from dam_outlook import forecast as fc
-from dam_outlook import models
+from dam_outlook import models, reserve
 from dam_outlook.normalize import TABLE_COLUMNS
 from dam_outlook.raw_store import JST
 
@@ -33,18 +34,34 @@ def storage_rows(days):
     return rows
 
 
+def excl_rows(days, reserve_m3=0, capacity=100000):
+    """Printed totals excluding the reserve for (date, total storage, ...) tuples."""
+    return [{"date": d, "storage_m3": s - reserve_m3, "capacity_m3": capacity - reserve.RESERVE_CAPACITY_M3,
+             "incl_storage_m3": s, "sources": "city_status"} for d, s, *_ in days]
+
+
+def no_reserve(test):
+    """Run a test case with a zero reserve capacity, so the totals are the excluded totals."""
+    patch = mock.patch.object(reserve, "RESERVE_CAPACITY_M3", 0)
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
 class BaselineTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.norm = Path(self.tmp.name) / "normalized"
         self.out = Path(self.tmp.name) / "forecasts"
+        no_reserve(self)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_storage(self, days, precip=()):
+    def write_storage(self, days, precip=(), excl=None):
         write(self.norm / "dam_storage.csv", TABLE_COLUMNS["dam_storage"], storage_rows(days))
         write(self.norm / "precip_daily.csv", TABLE_COLUMNS["precip_daily"], list(precip))
+        write(self.norm / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"],
+              excl_rows(days) if excl is None else excl)
 
     def test_rate_is_median_of_dry_days(self):
         self.write_storage([
@@ -70,6 +87,27 @@ class BaselineTest(unittest.TestCase):
         r = models.baseline_norain(models.load_observations(self.norm), date(2026, 10, 21), horizon=3)
         self.assertEqual([x["storage_m3"] for x in r["forecast"]], [0, 0, 0])
 
+    def test_reserve_subtracted_and_carried_forward(self):
+        reserve.RESERVE_CAPACITY_M3 = 20000  # undone by the patch
+        days = [("2026-10-23", 50000, -200, 0), ("2026-10-24", 49800, -200, 0), ("2026-10-25", 49600, -200, 0)]
+        # Printed on Friday only: the reserve 30000 is carried to the weekend.
+        self.write_storage(days, excl=excl_rows(days[:1], reserve_m3=30000))
+        r = models.baseline_norain(models.load_observations(self.norm), date(2026, 10, 25), horizon=2)
+        self.assertEqual(r["inputs"]["base_excl_storage_m3"], 19600)
+        self.assertEqual((r["inputs"]["reserve_m3"], r["inputs"]["reserve_date"]), (30000, "2026-10-23"))
+        self.assertEqual(r["inputs"]["reserve_source"], "carried from 2026-10-23")
+        self.assertEqual((r["inputs"]["capacity_m3"], r["inputs"]["incl_capacity_m3"]), (80000, 100000))
+        self.assertEqual([(x["storage_m3"], x["storage_pct"]) for x in r["forecast"]], [(19400, 24.25), (19200, 24.0)])
+
+        # A printed value on the base date is used as is.
+        self.write_storage(days, excl=excl_rows(days[:1], reserve_m3=30000) + excl_rows(days[2:], reserve_m3=29000))
+        r = models.baseline_norain(models.load_observations(self.norm), date(2026, 10, 25), horizon=1)
+        self.assertEqual((r["inputs"]["base_excl_storage_m3"], r["inputs"]["reserve_m3"]), (20600, 29000))
+
+        # No reserve known up to the base date: no forecast.
+        self.write_storage(days, excl=[])
+        self.assertIsNone(models.baseline_norain(models.load_observations(self.norm), date(2026, 10, 25)))
+
     def test_amedas_dryness_and_diff_without_report(self):
         self.write_storage([("2026-10-24", 1000, None, None), ("2026-10-25", 900, None, None)],
                            precip=[{"date": "2026-10-25", "station_code": c, "precip_9to9_mm": 0.0}
@@ -84,7 +122,8 @@ class BaselineTest(unittest.TestCase):
         written = fc.issue(self.norm, self.out, now)
         self.assertEqual(len(written), 1)
         doc = json.loads(written[0].read_text())
-        self.assertEqual((doc["model"], doc["model_version"], doc["base_date"]), ("baseline_norain", "1", "2026-10-21"))
+        self.assertEqual((doc["model"], doc["model_version"], doc["base_date"]), ("baseline_norain", "2", "2026-10-21"))
+        self.assertEqual(doc["target"], "storage_excl_reserve_m3")
         self.assertEqual(len(doc["forecast"]), models.HORIZON_DAYS)
 
         later = datetime(2026, 10, 22, 0, 20, tzinfo=JST)
@@ -117,11 +156,14 @@ def synthetic_history(norm, days=420, end=date(2026, 10, 22)):
     write(norm / "dam_storage.csv", TABLE_COLUMNS["dam_storage"],
           [{"date": last["date"], "dam_id": "total", "storage_m3": last["storage_m3"], "storage_pct": "",
             "capacity_m3": 2000000, "change_m3": "", "sources": "nippou"}])
+    write(norm / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"],
+          excl_rows([(last["date"], last["storage_m3"])], capacity=2000000))
     return rain
 
 
 class ScenarioTest(unittest.TestCase):
     def setUp(self):
+        no_reserve(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.norm = Path(self.tmp.name)
         self.rain = synthetic_history(self.norm)

@@ -67,6 +67,10 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(rec.path, "bodik_dam_hourly/2026/10/dam_hourly__20261026T140000+0900.csv.gz")
         self.assertEqual(gzip.decompress((self.root / rec.path).read_bytes()), body)
 
+    def test_status_page_stored(self):
+        rec = self.fetcher(FakeWeb({fetch.CITY_DAM_STATUS_URL: (200, b"<html>31.25</html>")})).fetch_city_dam_status()
+        self.assertEqual(rec.path, "city_dam_status/2026/10/002__20261026T140000+0900.html.gz")
+
     def test_snapshot_error_is_logged_and_reported(self):
         f = self.fetcher(FakeWeb({fetch.JMA_P1M_URL: (None, b"timed out")}))
         self.assertIsNone(f.fetch_jma_p1m())

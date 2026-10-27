@@ -148,6 +148,37 @@ class EtrnTest(unittest.TestCase):
             n.parse_etrn_daily("<html>maintenance</html>", "2025-09")
 
 
+class ExcludedTotalTest(unittest.TestCase):
+    @unittest.skipUnless((FIXTURES / "city_dam_status.html").exists(), "no city fixtures")
+    def test_status_page(self):
+        parsed = n.parse_city_dam_status(fixture("city_dam_status.html"))
+        self.assertEqual(parsed["observed_at"], datetime(2026, 10, 27, 9, tzinfo=JST))
+        self.assertEqual(parsed["excl"], {"storage_pct": 31.25, "storage_m3": 17211000})
+        self.assertEqual(parsed["incl"], {"storage_pct": 42.25, "storage_m3": 33098000})
+
+    def test_status_page_without_totals_raises(self):
+        with self.assertRaises(n.ParseError):
+            n.parse_city_dam_status("<h3>2026年10月27日 午前9時現在</h3><p>工事中</p>")
+
+    def test_report_text(self):
+        text = ("令 和 ８ 年 ９ 月\n生活環境委員会\n１ 水源状況\n９月29日午前９時時点の福岡市関連９ダムの合計貯水量"
+                "（渇水対策容量分を除く）は\n 18,333千㎥、貯水率は34.2％\n")
+        self.assertEqual(n.parse_report_excl(text), {"date": date(2026, 9, 29), "storage_m3": 18333000, "storage_pct": 34.2})
+        jan = text.replace("９ 月", "1 月").replace("９月29日", "12月22日").replace("時点", "現在")
+        self.assertEqual(n.parse_report_excl(jan)["date"], date(2025, 12, 22))
+
+    def test_status_page_wins_over_report(self):
+        tables = n.Tables()
+        d = date(2026, 10, 27)
+        n._merge_excl(tables, d, {"storage_pct": 31.2, "storage_m3": 17200000}, "report")
+        n._merge_excl(tables, d, {"storage_pct": 31.25, "storage_m3": 17211000, "incl_storage_pct": 42.25,
+                                  "incl_storage_m3": 33098000}, "city_status")
+        n._merge_excl(tables, d, {"storage_pct": 31.2, "storage_m3": 17200000}, "report")
+        row = tables.storage_excl["2026-10-27"]
+        self.assertEqual((row["storage_m3"], row["capacity_m3"], row["sources"]), (17211000, 55071000, "city_status;report"))
+        self.assertEqual(len(tables.warnings), 2)
+
+
 class NormalizeRunTest(unittest.TestCase):
     @needs_city_fixtures
     def test_end_to_end_from_store(self):

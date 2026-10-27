@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import io
 import json
 import re
@@ -137,6 +138,45 @@ def parse_city_dam_text(html: str) -> dict:
     if not dams:
         raise ParseError("no dam rows found")
     return {"observed_at": observed_at, "dams": dams}
+
+
+# ---------------------------------------------------------------- city status page (drought reserve)
+
+
+def _page_text(body: str) -> str:
+    return _squash(html.unescape(re.sub(r"<[^>]*>", " ", body)))
+
+
+def parse_city_dam_status(body: str) -> dict:
+    """Parse きょうのダム状況: the 9-dam total excluding and including the drought reserve."""
+    text = _page_text(body)
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日午前(\d{1,2})時現在", text)
+    if not m:
+        raise ParseError("observation time not found")
+    y, mo, d, hh = map(int, m.groups())
+    out = {"observed_at": datetime(y, mo, d, hh, tzinfo=JST)}
+    for key, label in (("excl", "除く"), ("incl", "含む")):
+        v = re.search(rf"渇水対策容量分{label}9ダム合計の貯水率([\d.]+)%9ダム合計の貯水量([\d,]+)千立方メートル", text)
+        if not v:
+            raise ParseError(f"total {label} not found")
+        out[key] = {"storage_pct": _number(v.group(1)), "storage_m3": int(_number(v.group(2))) * 1000}
+    return out
+
+
+def parse_report_excl(text: str) -> dict:
+    """The 9-dam total excluding the drought reserve printed in a 水事情について report."""
+    flat = _squash(text)
+    m = re.search(r"(\d{1,2})月(\d{1,2})日午前9時(?:現在|時点)の福岡市関連9ダムの合計貯水量"
+                  r"\(渇水対策容量分を除く\)は([\d,]+)千m3、貯水率は([\d.]+)%", flat)
+    era = re.search(r"令和(\d+)年(\d+)月", flat)
+    if not (m and era):
+        raise ParseError("excluded total not found")
+    mo, d = int(m.group(1)), int(m.group(2))
+    year = 2018 + int(era.group(1))
+    if mo > int(era.group(2)):  # a January report on a December day
+        year -= 1
+    return {"date": date(year, mo, d), "storage_m3": int(_number(m.group(3))) * 1000,
+            "storage_pct": _number(m.group(4))}
 
 
 # ---------------------------------------------------------------- daily report PDF
@@ -439,6 +479,11 @@ CAPACITY_M3 = {
     "nagatani": 4_850_000, "inono": 3_650_000, "zuibaiji": 1_220_000,
 }
 MINAMIHATA_FLOOD_SEASON_M3 = 3_650_000
+# Drought reserve (渇水対策容量) within the 9-dam water-use capacity: 五ケ山 16,600千m³
+# and 江川's share of the reserve of the 江川・寺内・小石原川 system (6,676千m³), from the
+# city's reports (capacity 78,347 including, 55,071 excluding; 76,877 and 53,601 in the
+# flood season).
+RESERVE_CAPACITY_M3 = 23_276_000
 
 
 def capacity_m3(dam: str, d: date) -> int:
@@ -493,6 +538,7 @@ class Tables:
     p1m: dict = field(default_factory=dict)
     weekly_pop: dict = field(default_factory=dict)
     weekly_precip_normal: dict = field(default_factory=dict)
+    storage_excl: dict = field(default_factory=dict)  # date -> row
     hourly: dict = field(default_factory=dict)  # station -> {time: {"1h", "24h"}}
     etrn_daily: dict = field(default_factory=dict)  # (date, station) -> row
     warnings: list = field(default_factory=list)
@@ -502,6 +548,9 @@ TABLE_COLUMNS = {
     "dam_storage": [
         "date", "dam_id", "dam_name", "storage_pct", "storage_m3", "capacity_m3",
         "change_m3", "precip_mm", "precip_raw", "sources",
+    ],
+    "dam_storage_excl": [
+        "date", "storage_pct", "storage_m3", "capacity_m3", "incl_storage_pct", "incl_storage_m3", "sources",
     ],
     "distribution": ["date", "plant_id", "plant_name", "volume_m3"],
     "jma_p1m": [
@@ -552,6 +601,25 @@ def _merge_storage(tables: Tables, d: date, row: dict, source: str):
     cur["sources"] = ";".join(sorted(srcs | {source}))
 
 
+# When the status page and a report give the same day, the page wins.
+EXCL_SOURCE_RANK = ("city_status", "report")
+
+
+def _merge_excl(tables: Tables, d: date, row: dict, source: str):
+    key = d.isoformat()
+    cur = tables.storage_excl.get(key)
+    new = {"date": key, "capacity_m3": capacity_m3("total", d) - RESERVE_CAPACITY_M3, "sources": source, **row}
+    if cur is None:
+        tables.storage_excl[key] = new
+        return
+    if cur["storage_m3"] != new["storage_m3"]:
+        tables.warnings.append(f"dam_storage_excl {key}: {cur['storage_m3']} ({cur['sources']}) vs {new['storage_m3']} ({source})")
+    srcs = set(cur["sources"].split(";")) | {source}
+    if all(EXCL_SOURCE_RANK.index(source) <= EXCL_SOURCE_RANK.index(s) for s in srcs):
+        cur.update(new)
+    cur["sources"] = ";".join(sorted(srcs))
+
+
 def build_tables(store: RawStore) -> Tables:
     tables = Tables()
     for e in store.log_entries():
@@ -564,6 +632,14 @@ def build_tables(store: RawStore) -> Tables:
                 parsed = parse_city_dam_text(body.decode("utf-8", errors="replace"))
                 for row in parsed["dams"]:
                     _merge_storage(tables, parsed["observed_at"].date(), row, "city_text")
+            elif source == "city_dam_status":
+                parsed = parse_city_dam_status(body.decode("utf-8", errors="replace"))
+                _merge_excl(tables, parsed["observed_at"].date(), {
+                    **parsed["excl"], "incl_storage_pct": parsed["incl"]["storage_pct"],
+                    "incl_storage_m3": parsed["incl"]["storage_m3"]}, "city_status")
+            elif source == "city_reports":
+                row = parse_report_excl(pdf_text(body))
+                _merge_excl(tables, row.pop("date"), row, "report")
             elif source == "city_nippou":
                 parsed = parse_nippou_text(pdf_text(body))
                 d = parsed["report_date"]
@@ -645,6 +721,7 @@ def normalize(raw_dir: Path, out_dir: Path) -> list[str]:
     tables = build_tables(store)
     names = station_names(store)
     write_csv(out_dir / "dam_storage.csv", TABLE_COLUMNS["dam_storage"], tables.dam_storage.values())
+    write_csv(out_dir / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"], tables.storage_excl.values())
     write_csv(out_dir / "distribution.csv", TABLE_COLUMNS["distribution"], tables.distribution.values())
     write_csv(out_dir / "jma_p1m.csv", TABLE_COLUMNS["jma_p1m"], tables.p1m.values())
     write_csv(out_dir / "jma_weekly_pop.csv", TABLE_COLUMNS["jma_weekly_pop"], tables.weekly_pop.values())
