@@ -1,0 +1,281 @@
+{
+ "model": "baseline_norain",
+ "model_version": "2",
+ "issued_at": "2026-10-27T13:42:09+09:00",
+ "base_date": "2026-10-27",
+ "target": "storage_excl_reserve_m3",
+ "base_sources": "bodik_hourly;city_text;nippou",
+ "inputs_sha256": "2fa946b8751c182912b6bb2eccf463306d8760991d208f58360c48315ecd403d",
+ "inputs": {
+  "base_date": "2026-10-27",
+  "base_storage_m3": 33098000,
+  "base_excl_storage_m3": 17211000,
+  "reserve_m3": 15887000,
+  "reserve_date": "2026-10-27",
+  "reserve_source": "city_status",
+  "capacity_m3": 55071000,
+  "incl_capacity_m3": 78347000,
+  "daily_changes": [
+   {
+    "date": "2026-10-14",
+    "change_m3": -124000,
+    "dry": false,
+    "dry_source": "unknown"
+   },
+   {
+    "date": "2026-10-15",
+    "change_m3": -211000,
+    "dry": false,
+    "dry_source": "unknown"
+   },
+   {
+    "date": "2026-10-16",
+    "change_m3": -241000,
+    "dry": true,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-17",
+    "change_m3": -318000,
+    "dry": false,
+    "dry_source": "unknown"
+   },
+   {
+    "date": "2026-10-18",
+    "change_m3": -234000,
+    "dry": true,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-19",
+    "change_m3": -268000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-20",
+    "change_m3": -198000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-21",
+    "change_m3": -152000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-22",
+    "change_m3": -16000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-23",
+    "change_m3": -164000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-24",
+    "change_m3": 101000,
+    "dry": false,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-25",
+    "change_m3": 28000,
+    "dry": false,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-26",
+    "change_m3": 1181000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-27",
+    "change_m3": 862000,
+    "dry": false,
+    "dry_source": "nippou"
+   }
+  ],
+  "rate_pool": "dry_days"
+ },
+ "params": {
+  "rate_m3_per_day": -234000,
+  "window_days": 14,
+  "min_dry_days": 3
+ },
+ "forecast": [
+  {
+   "date": "2026-10-28",
+   "horizon_days": 1,
+   "storage_m3": 16977000,
+   "storage_pct": 30.83
+  },
+  {
+   "date": "2026-10-29",
+   "horizon_days": 2,
+   "storage_m3": 16743000,
+   "storage_pct": 30.4
+  },
+  {
+   "date": "2026-10-30",
+   "horizon_days": 3,
+   "storage_m3": 16509000,
+   "storage_pct": 29.98
+  },
+  {
+   "date": "2026-10-31",
+   "horizon_days": 4,
+   "storage_m3": 16275000,
+   "storage_pct": 29.55
+  },
+  {
+   "date": "2026-11-01",
+   "horizon_days": 5,
+   "storage_m3": 16041000,
+   "storage_pct": 29.13
+  },
+  {
+   "date": "2026-11-02",
+   "horizon_days": 6,
+   "storage_m3": 15807000,
+   "storage_pct": 28.7
+  },
+  {
+   "date": "2026-11-03",
+   "horizon_days": 7,
+   "storage_m3": 15573000,
+   "storage_pct": 28.28
+  },
+  {
+   "date": "2026-11-04",
+   "horizon_days": 8,
+   "storage_m3": 15339000,
+   "storage_pct": 27.85
+  },
+  {
+   "date": "2026-11-05",
+   "horizon_days": 9,
+   "storage_m3": 15105000,
+   "storage_pct": 27.43
+  },
+  {
+   "date": "2026-11-06",
+   "horizon_days": 10,
+   "storage_m3": 14871000,
+   "storage_pct": 27.0
+  },
+  {
+   "date": "2026-11-07",
+   "horizon_days": 11,
+   "storage_m3": 14637000,
+   "storage_pct": 26.58
+  },
+  {
+   "date": "2026-11-08",
+   "horizon_days": 12,
+   "storage_m3": 14403000,
+   "storage_pct": 26.15
+  },
+  {
+   "date": "2026-11-09",
+   "horizon_days": 13,
+   "storage_m3": 14169000,
+   "storage_pct": 25.73
+  },
+  {
+   "date": "2026-11-10",
+   "horizon_days": 14,
+   "storage_m3": 13935000,
+   "storage_pct": 25.3
+  },
+  {
+   "date": "2026-11-11",
+   "horizon_days": 15,
+   "storage_m3": 13701000,
+   "storage_pct": 24.88
+  },
+  {
+   "date": "2026-11-12",
+   "horizon_days": 16,
+   "storage_m3": 13467000,
+   "storage_pct": 24.45
+  },
+  {
+   "date": "2026-11-13",
+   "horizon_days": 17,
+   "storage_m3": 13233000,
+   "storage_pct": 24.03
+  },
+  {
+   "date": "2026-11-14",
+   "horizon_days": 18,
+   "storage_m3": 12999000,
+   "storage_pct": 23.6
+  },
+  {
+   "date": "2026-11-15",
+   "horizon_days": 19,
+   "storage_m3": 12765000,
+   "storage_pct": 23.18
+  },
+  {
+   "date": "2026-11-16",
+   "horizon_days": 20,
+   "storage_m3": 12531000,
+   "storage_pct": 22.75
+  },
+  {
+   "date": "2026-11-17",
+   "horizon_days": 21,
+   "storage_m3": 12297000,
+   "storage_pct": 22.33
+  },
+  {
+   "date": "2026-11-18",
+   "horizon_days": 22,
+   "storage_m3": 12063000,
+   "storage_pct": 21.9
+  },
+  {
+   "date": "2026-11-19",
+   "horizon_days": 23,
+   "storage_m3": 11829000,
+   "storage_pct": 21.48
+  },
+  {
+   "date": "2026-11-20",
+   "horizon_days": 24,
+   "storage_m3": 11595000,
+   "storage_pct": 21.05
+  },
+  {
+   "date": "2026-11-21",
+   "horizon_days": 25,
+   "storage_m3": 11361000,
+   "storage_pct": 20.63
+  },
+  {
+   "date": "2026-11-22",
+   "horizon_days": 26,
+   "storage_m3": 11127000,
+   "storage_pct": 20.2
+  },
+  {
+   "date": "2026-11-23",
+   "horizon_days": 27,
+   "storage_m3": 10893000,
+   "storage_pct": 19.78
+  },
+  {
+   "date": "2026-11-24",
+   "horizon_days": 28,
+   "storage_m3": 10659000,
+   "storage_pct": 19.36
+  }
+ ]
+}
