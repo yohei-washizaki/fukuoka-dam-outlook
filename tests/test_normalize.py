@@ -192,7 +192,7 @@ class NormalizeRunTest(unittest.TestCase):
                        url="u", fetched_at=at, status=200, body=fixture("jma_p1m_010900.json").encode())
             store.save(source="jma_forecast", key="jma_forecast", subdir="x", name="f", ext="json",
                        url="u", fetched_at=at, status=200, body=b"{broken")
-            warnings = n.normalize(raw, out)
+            warnings = n.normalize(raw, out).warnings
             self.assertEqual(len(warnings), 1)
             self.assertIn("jma_forecast", warnings[0])
             with (out / "dam_storage.csv").open(encoding="utf-8") as f:
@@ -254,9 +254,27 @@ class DamHourlyCsvTest(unittest.TestCase):
         self.assertEqual(row["sources"], "bodik_hourly;nippou")
         self.assertEqual(tables.warnings, [])  # 1千m³ apart: a rounding step
 
+        # A preliminary value 100千m³ off: a revision, noted without a warning.
         n._merge_storage(tables, d, {**hourly, "storage_m3": 31007000, "storage_pct": 39.58}, "bodik_hourly")
         self.assertEqual(row["storage_m3"], 31107000)
-        self.assertEqual(len(tables.warnings), 2)
+        self.assertEqual(tables.warnings, [])
+        self.assertEqual(len(tables.notes), 1)
+        self.assertIn("preliminary value revised", tables.notes[0])
+        # Beyond PRELIMINARY_TOLERANCE_M3 it looks like a broken parse: warned.
+        n._merge_storage(tables, d, {**hourly, "storage_m3": 30807000, "storage_pct": 39.32}, "bodik_hourly")
+        self.assertEqual(len(tables.warnings), 1)
+
+    def test_confirmed_sources_still_conflict(self):
+        tables = n.Tables()
+        d = date(2026, 10, 27)
+        row = {"dam_id": "inono", "dam_name": "猪野ダム", "storage_pct": 54.08, "storage_m3": 1974000}
+        n._merge_storage(tables, d, row, "bodik_hourly")
+        n._merge_storage(tables, d, {**row, "storage_pct": 55.1, "storage_m3": 2011000}, "city_text")
+        self.assertEqual((tables.warnings, len(tables.notes)), ([], 1))
+        # A confirmed value differing from the one held (city_text) is a conflict even with bodik in the sources.
+        n._merge_storage(tables, d, {**row, "storage_pct": 55.0, "storage_m3": 2008000, "capacity_m3": 3650000,
+                                     "change_m3": 0, "precip_mm": None, "precip_raw": ""}, "nippou")
+        self.assertEqual(len(tables.warnings), 1)
 
 
 @unittest.skipUnless(__import__("importlib").util.find_spec("pypdf"), "pypdf not installed")

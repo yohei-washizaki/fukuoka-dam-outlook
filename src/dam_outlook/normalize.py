@@ -542,6 +542,7 @@ class Tables:
     hourly: dict = field(default_factory=dict)  # station -> {time: {"1h", "24h"}}
     etrn_daily: dict = field(default_factory=dict)  # (date, station) -> row
     warnings: list = field(default_factory=list)
+    notes: list = field(default_factory=list)  # expected differences, reported without failing
 
 
 TABLE_COLUMNS = {
@@ -567,14 +568,25 @@ TABLE_COLUMNS = {
 # When sources disagree, the first one here wins (and a warning is kept).
 STORAGE_SOURCE_RANK = ("nippou", "city_text", "bodik_hourly")
 # The hourly CSV is in 千m³ and its rate is computed here, so it differs from the
-# daily report by a rounding step on most days; only larger gaps are warned about.
+# daily report by a rounding step on most days; those gaps are not reported.
 HOURLY_TOLERANCE_M3 = 2000
+# The hourly CSV is preliminary (速報値), and the confirmed values of the daily report and
+# the text page sometimes differ (2026-10-27: 37千m³ at 猪野). Such revisions are noted
+# without failing the run. A larger gap looks like a broken parse rather than a revision
+# (the CSV's own total column was off by up to 104千m³), so it is still warned about.
+PRELIMINARY_TOLERANCE_M3 = 200_000
 
 
-def _rounding_gap(cur: dict, row: dict, source: str) -> bool:
-    if "bodik_hourly" not in (source, *cur["sources"].split(";")):
-        return False
-    return abs(int(cur["storage_m3"]) - int(row["storage_m3"])) <= HOURLY_TOLERANCE_M3
+def _gap_kind(cur: dict, row: dict, source: str) -> str:
+    """How a differing value compares: "rounding", "revision" (of the preliminary value) or "conflict"."""
+    srcs = [s for s in cur["sources"].split(";") if s]
+    held = min(srcs, key=STORAGE_SOURCE_RANK.index)  # the source of the value held so far
+    if "bodik_hourly" not in (source, held):
+        return "conflict"
+    gap = abs(int(cur["storage_m3"]) - int(row["storage_m3"]))
+    if gap <= HOURLY_TOLERANCE_M3:
+        return "rounding"
+    return "revision" if gap <= PRELIMINARY_TOLERANCE_M3 else "conflict"
 
 
 def _merge_storage(tables: Tables, d: date, row: dict, source: str):
@@ -586,12 +598,20 @@ def _merge_storage(tables: Tables, d: date, row: dict, source: str):
         tables.dam_storage[key] = cur
     srcs = set(filter(None, cur["sources"].split(";")))
     wins = all(STORAGE_SOURCE_RANK.index(source) < STORAGE_SOURCE_RANK.index(s) for s in srcs)
+    if cur["storage_m3"] != "" and cur["storage_m3"] != row["storage_m3"]:
+        kind = _gap_kind(cur, row, source)
+        msg = f"dam_storage {key}: {cur['storage_m3']} ({cur['sources']}) vs {row['storage_m3']} ({source})"
+        if kind == "revision":
+            tables.notes.append(f"{msg}, preliminary value revised")
+        elif kind == "conflict":
+            tables.warnings.append(msg)
+    elif cur["storage_pct"] != "" and cur["storage_pct"] != row["storage_pct"]:
+        if "bodik_hourly" not in (source, *srcs):  # the hourly rate is computed here, so it may differ
+            tables.warnings.append(f"dam_storage {key} storage_pct: {cur['storage_pct']} ({cur['sources']}) "
+                                   f"vs {row['storage_pct']} ({source})")
     for k in ("storage_pct", "storage_m3"):
-        if cur[k] != "" and cur[k] != row[k]:
-            if not _rounding_gap(cur, row, source):
-                tables.warnings.append(f"dam_storage {key} {k}: {cur[k]} ({cur['sources']}) vs {row[k]} ({source})")
-            if not wins:
-                continue
+        if cur[k] != "" and cur[k] != row[k] and not wins:
+            continue
         cur[k] = row[k]
     for k in ("capacity_m3", "change_m3", "precip_mm", "precip_raw"):
         if k in row and row[k] is not None and (wins or cur[k] == ""):
@@ -716,7 +736,7 @@ def write_csv(path: Path, columns: list[str], rows) -> None:
     path.write_text(buf.getvalue(), encoding="utf-8")
 
 
-def normalize(raw_dir: Path, out_dir: Path) -> list[str]:
+def normalize(raw_dir: Path, out_dir: Path) -> Tables:
     store = RawStore(raw_dir)
     tables = build_tables(store)
     names = station_names(store)
@@ -740,7 +760,7 @@ def normalize(raw_dir: Path, out_dir: Path) -> list[str]:
         TABLE_COLUMNS["jma_daily_precip"],
         ({**r, "station_name": names.get(r["station_code"], "")} for r in tables.etrn_daily.values()),
     )
-    return tables.warnings
+    return tables
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -748,10 +768,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/normalized"))
     args = parser.parse_args(argv)
-    warnings = normalize(args.raw_dir, args.out_dir)
-    for w in warnings:
+    tables = normalize(args.raw_dir, args.out_dir)
+    for note in tables.notes:
+        print(f"note: {note}")
+    for w in tables.warnings:
         print(f"warning: {w}", file=sys.stderr)
-    return 1 if warnings else 0
+    return 1 if tables.warnings else 0
 
 
 if __name__ == "__main__":
