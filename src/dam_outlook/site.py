@@ -620,10 +620,11 @@ hit.addEventListener('pointermove',show);hit.addEventListener('pointerdown',show
 
 
 def render(data: dict, now: datetime) -> str:
+    # Icon links are relative so the page also works under a path (the canvas preview, ops/canvas/).
     body = "\n".join([section_now(data), section_outlook(data), section_history(data), section_verification(data)])
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
+<meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
 <body><main>
 <h1>福岡市ダム貯水率の予想サイト</h1>
 <p class="sub">公表されたデータと、それを元にした独自の予想を趣味で掲載しています。</p>
