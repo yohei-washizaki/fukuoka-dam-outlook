@@ -20,6 +20,7 @@ class SiteTest(unittest.TestCase):
             page = site.render(data, datetime(2026, 10, 25, tzinfo=JST))
             self.assertIn("データがまだありません", page)
             self.assertIn("予想はまだ発行されていません", page)
+            self.assertNotIn('class="water"', page)  # no published rate, no water
 
     def test_page_with_forecasts(self):
         no_reserve(self)
@@ -56,6 +57,9 @@ class SiteTest(unittest.TestCase):
             # Summary tiles: the published rate, then the model's 28-day forecast.
             self.assertEqual(re.findall(r'<div class="stat (\w+)">', page), ["fact", "model"])
             self.assertIn("前回（10/21）から", page)
+            # The background fills to the latest published rate.
+            latest = data["excl"][site.published_excl(data)[-1]]["pct"]
+            self.assertIn(f'<div class="fill" style="--level:{latest:.2f}">', page)
             self.assertIn("4週間後（11/19）の予想", page)
             self.assertIn('<p class="headline"><span class="sent"><span class="ph">4週間後（11/19）の</span><span class="ph">貯水率は、</span>', page)
             self.assertIn('でしょう。</span>', page)

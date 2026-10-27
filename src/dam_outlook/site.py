@@ -87,6 +87,15 @@ def published_excl(data: dict) -> list[str]:
     return sorted(d for d, v in data["excl"].items() if v["published"])
 
 
+def water(data: dict) -> str:
+    """Page background filled like a glass to the latest published rate (a fact, not a forecast)."""
+    pub = published_excl(data)
+    if not pub:
+        return ""
+    level = min(max(data["excl"][pub[-1]]["pct"], 0), 100)
+    return f'<div class="water" aria-hidden="true"><div class="fill" style="--level:{level:.2f}"><i class="wave back"></i><i class="wave"></i></div></div>'
+
+
 def excl_lines(data: dict, start: date) -> list[dict]:
     """The solid line of printed values and the dashed estimates around it.
 
@@ -562,7 +571,8 @@ CSS = """
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif}
 main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
 h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0 0 8px;display:flex;gap:8px;align-items:center}
-section{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
+section{background:color-mix(in srgb,var(--surface) 70%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
 .sub,.note,.muted{color:var(--ink2);font-size:13px;margin:4px 0}.muted{color:var(--muted)}
 h3{font-size:14px;margin:12px 0 0}
 .headline{font-size:20px;font-weight:600;line-height:1.55;margin:0 0 12px}
@@ -602,6 +612,17 @@ a{color:var(--s1)}
 .tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);
 border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none;z-index:10}
 .tip b{display:block;margin-bottom:2px}
+.water{position:fixed;top:0;left:0;right:0;height:200vh;height:200lvh;z-index:-1;overflow:hidden;pointer-events:none;
+--w1:color-mix(in srgb,var(--s1) 16%,var(--page));--w2:color-mix(in srgb,var(--s1) 9%,var(--page))}
+.water .fill{position:absolute;left:0;right:0;bottom:0;background:var(--w1);
+height:calc(100vh + var(--level) * 1vh);height:calc(100lvh + var(--level) * 1lvh)}
+.wave{position:absolute;left:0;bottom:100%;width:calc(100% + 240px);height:14px;background:var(--w1);
+-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 14' preserveAspectRatio='none'%3E%3Cpath d='M0 7C40 0 80 0 120 7S200 14 240 7V14H0z'/%3E%3C/svg%3E") repeat-x 0 0/240px 100%;
+mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 14' preserveAspectRatio='none'%3E%3Cpath d='M0 7C40 0 80 0 120 7S200 14 240 7V14H0z'/%3E%3C/svg%3E") repeat-x 0 0/240px 100%;
+animation:wave 9s linear infinite}
+.wave.back{height:20px;background:var(--w2);animation-duration:14s;animation-direction:reverse;left:-90px;width:calc(100% + 330px)}
+@keyframes wave{to{transform:translateX(-240px)}}
+@media (prefers-reduced-motion:reduce){.wave{animation:none}}
 footer{color:var(--muted);font-size:12px;margin-top:24px}footer p{margin:4px 0}
 """
 
@@ -625,7 +646,7 @@ def render(data: dict, now: datetime) -> str:
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
-<body><main>
+<body>{water(data)}<main>
 <h1>福岡市ダム貯水率の予想サイト</h1>
 <p class="sub">公表されたデータと、それを元にした独自の予想を趣味で掲載しています。</p>
 {body}
