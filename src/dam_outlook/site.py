@@ -316,7 +316,7 @@ DELTA_MAX_DAYS = 7
 def section_now(data: dict) -> str:
     pub = published_excl(data)
     if not pub:
-        return '<section><h2>いま</h2><p class="muted">データがまだありません。</p></section>'
+        return '<section><h2>現在の貯水率</h2><p class="muted">データがまだありません。</p></section>'
     d = pub[-1]
     cur = data["excl"][d]
     # Change since the previous printed day (none on weekends, so not always yesterday);
@@ -473,10 +473,10 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
                      f'<td class="num">{fmt_m3(b["mae_m3"]) if b else "—"}</td>'
                      f'<td class="num">{fmt_m3(r["crps_approx_m3"])}</td>'
                      f'<td class="num">{100 * float(r["p10_p90_coverage"]):.0f}%</td></tr>')
-        parts.append(f"""<p class="note">過去にさかのぼった答え合わせ: {ym(first["first_base"])}〜{ym(first["last_base"])}の毎週（{esc(first["n"])}回）について、その日までのデータだけで予想し直し、実績と比べました。雨のシナリオからはその年を除き、当時の1か月予報は残っていないため3つの区分を同じ重みにしています。</p>
+        parts.append(f"""<p class="note">過去にさかのぼった検証: {ym(first["first_base"])}〜{ym(first["last_base"])}の毎週（{esc(first["n"])}回）について、その日までのデータだけで予想し直し、実績と比べました。雨のシナリオからはその年を除き、当時の1か月予報は残っていないため3つの区分を同じ重みにしています。</p>
 <table><thead><tr><th></th><th>中央値の誤差</th><th>雨なしの誤差</th><th>CRPS</th><th>80%の範囲に入った割合</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="note">誤差は貯水量の平均絶対誤差です。CRPS は範囲も含めた予想全体の外れ具合で、小さいほど良く、雨なしの計算では誤差と同じ値になります。この期間は雨が少なかったため、中央値は雨なしの計算より外れました。</p>""")
-    parts.append('<p class="note">発行した予想は、使った入力と一緒に書き換えずに保存し、下の「答え合わせ」で実績と比べます。</p>')
+    parts.append('<p class="note">発行した予想は、使った入力と一緒に書き換えずに保存し、下の「検証」で実績と比べます。</p>')
     return "\n".join(parts)
 
 
@@ -518,7 +518,7 @@ def section_history(data: dict) -> str:
 def section_verification(data: dict) -> str:
     s = data["summary"]
     if not s:
-        body = f'<p class="muted">予想した日の公表値が出ると、ここで答え合わせします（発行済みの予想 {data["n_forecasts"]} 件）。</p>'
+        body = f'<p class="muted">予想した日の公表値が出ると、ここで検証します（発行済みの予想 {data["n_forecasts"]} 件）。</p>'
     else:
         rows = "".join(
             f'<tr><td>{esc(r["model"])} v{esc(r["model_version"])}</td><td>{esc(r["horizon"])}日</td><td class="num">{esc(r["n"])}</td>'
@@ -528,7 +528,7 @@ def section_verification(data: dict) -> str:
         )
         body = f"""<table><thead><tr><th>モデル</th><th>何日先</th><th>件数</th><th>平均絶対誤差</th><th>雨なし比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="note">雨なし比スキル = 1 − 誤差 ÷ 雨が降らない場合の誤差（0より大きければ良い）。80%範囲の的中率は 0.8 に近いほど適切です。Brier は閾値を下回る確率の誤差です（0 が最良）。</p>"""
-    return f'<section><h2>答え合わせ <span class="badge model">モデル評価</span></h2>{body}</section>'
+    return f'<section><h2>検証 <span class="badge model">モデル評価</span></h2>{body}</section>'
 
 
 def restriction_details(events: list[dict]) -> str:
@@ -634,7 +634,7 @@ def render(data: dict, now: datetime) -> str:
 <p>出典: 福岡市水道局「きょうのダム状況」「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
-<p>計算のコード・発行した予想・答え合わせの結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
+<p>計算のコード・発行した予想・検証の結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
 </footer>
 </main><script>{JS}</script></body></html>
 """

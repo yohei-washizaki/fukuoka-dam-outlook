@@ -1,17 +1,17 @@
 # fukuoka-dam-outlook
 
-福岡市関連9ダム合計の貯水量（渇水対策容量分を除く）について、28日先までの確率つきの見通しを毎日出し、実績と答え合わせする個人の非公式プロジェクトです。福岡市・気象庁とは関係ありません。サイト: https://dam-outlook.pages.dev/
+福岡市関連9ダム合計の貯水量（渇水対策容量分を除く）について、28日先までの確率つきの見通しを毎日出し、実績と比べて検証する個人の非公式プロジェクトです。福岡市・気象庁とは関係ありません。サイト: https://dam-outlook.pages.dev/
 
 このリポジトリは、非公開の開発用リポジトリから自動で書き出した公開用の写しです。データの取得と予測のたびに更新されます。ここへの直接の変更は次の同期で上書きされます。
 
 ## 含まれるもの
 
-- `src/dam_outlook/`: 取得・正規化・予測・答え合わせ・サイト生成のコード
+- `src/dam_outlook/`: 取得・正規化・予測・検証・サイト生成のコード
 - `tests/`: テスト
 - `docs/`: データ源・表の定義（[docs/tables.md](docs/tables.md)）・モデル（[docs/models.md](docs/models.md)）・判断の記録
 - `data/normalized/`: 取得した元データから作った日次の表
 - `data/forecasts/`: 発行した予測（1件1ファイル。発行後に書き換えない）
-- `data/verification/`: 答え合わせの結果
+- `data/verification/`: 検証の結果
 - `data/curated/events.csv`: 筑後川の取水制限率の変更（出典つき）
 - `data/curated/storage_chart_sources.csv`: 過去の貯水量を読み取った報告資料の一覧
 
@@ -29,8 +29,8 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
 ```
 
 - **予測を計算し直す**: `PYTHONPATH=src .venv/bin/python -m dam_outlook.forecast --forecast-dir /tmp/forecasts`。予測を発行した直後の同期コミットの `data/normalized/` から実行すると、保存された予測と同じ入力（`inputs_sha256`）と同じ結果になります。乱数の種は入力から決まります。
-- **答え合わせをし直す**: `PYTHONPATH=src .venv/bin/python -m dam_outlook.verify --out-dir /tmp/verification`。`data/verification/scores.csv`（予測1件・対象日1日ごと）と `summary.csv` を作ります。
-- **過去にさかのぼった答え合わせ**: `PYTHONPATH=src .venv/bin/python -m dam_outlook.hindcast --out /tmp/hindcast.csv`（数分）。2023-08 以降の毎週の基準日について、その日までのデータだけで予測し直します。
+- **検証をし直す**: `PYTHONPATH=src .venv/bin/python -m dam_outlook.verify --out-dir /tmp/verification`。`data/verification/scores.csv`（予測1件・対象日1日ごと）と `summary.csv` を作ります。
+- **過去にさかのぼった検証**: `PYTHONPATH=src .venv/bin/python -m dam_outlook.hindcast --out /tmp/hindcast.csv`（数分）。2023-08 以降の毎週の基準日について、その日までのデータだけで予測し直します。
 - **予測が後から書き換えられていないこと**: 各予測ファイルの `issued_at` と、このリポジトリでそのファイルが最初に現れたコミットを比べられます。このリポジトリの履歴は公開を始めた時点からです。
 
 ## 公表値と推定値
