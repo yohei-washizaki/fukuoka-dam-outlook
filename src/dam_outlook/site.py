@@ -396,7 +396,7 @@ def section_now(data: dict) -> str:
         for r in data["dams"] if r["storage_pct"]
     )
     incl = f"渇水対策容量分を含む9ダム合計は{float(incl_pct):.2f}%（{md(d)}）です。" if incl_pct not in (None, "") else ""
-    return f"""<section>
+    return f"""<section class="now">
 {f'<p class="headline">{head}</p>' if head else ""}
 <div class="stats">{"".join(tiles)}</div>
 <details><summary>渇水対策容量とは</summary>
@@ -616,7 +616,9 @@ h3{font-size:14px;margin:12px 0 0}
 .stat-label{font-size:13px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .stat-num{font-size:48px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums}
 .stat-sub{font-size:13px;color:var(--ink2)}.stat.model .stat-num{color:var(--s2)}
-@media (max-width:600px){.stat-num{font-size:40px}}
+@media (max-width:600px){.stat-num{font-size:40px}
+.now{display:flex;flex-direction:column}.now .stats{display:contents}.now .stat{margin:0 0 16px}
+.now .stat.fact{order:-2}.now .headline{order:-1}}
 .bar{display:inline-block;width:56px;height:8px;margin-right:8px;background:var(--grid);border-radius:4px;overflow:hidden;vertical-align:middle}
 .bar i{display:block;height:100%;background:var(--s1)}
 .tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}
