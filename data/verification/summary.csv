@@ -1,4 +1,6 @@
 model,model_version,horizon,n,mae_m3,bias_m3,baseline_mae_m3,mae_skill,p10_p90_coverage,brier_mean,brier_n
-baseline_norain,1,1-7,8,1547875,-1547875,,,,,
-scenario_jma_tercile,0,1-7,10,1156885,-919358,1833000,0.369,0.0,0.0,40
-scenario_jma_tercile,1,1-7,13,762773,-576941,1657538,0.54,0.462,0.0,52
+baseline_norain,1,1-7,8,1547500,-1547500,,,,,
+baseline_norain,2,1-7,1,533000,-533000,,,,,
+scenario_jma_tercile,0,1-7,10,1156685,-919158,1832800,0.369,0.0,0.0,40
+scenario_jma_tercile,1,1-7,13,762619,-576633,1653231,0.539,0.462,0.0,52
+scenario_jma_tercile,2,1-7,1,350243,350243,533000,0.343,0.0,0.0,4
