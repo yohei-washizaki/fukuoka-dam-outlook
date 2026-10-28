@@ -323,7 +323,7 @@ def phrases(*parts: str) -> str:
 def trend_phrase(now_pct: float, p50: float) -> list[str]:
     """One answer per case: flat within FLAT_PT points of now, otherwise up or down."""
     diff = p50 - now_pct
-    value = f'<span class="model">{p50:.0f}%前後</span>'
+    value = f'<span class="model"><span class="big">{p50:.0f}%</span>前後</span>'
     if abs(diff) <= FLAT_PT:
         return ["ほぼ横ばいの", f"{value}に", "なるでしょう。"]
     return [f"{value}まで", f'{"上がる" if diff > 0 else "下がる"}でしょう。']
@@ -618,7 +618,9 @@ h3{font-size:14px;margin:12px 0 0}
 .stat-sub{font-size:13px;color:var(--ink2)}.stat.model .stat-num{color:var(--s2)}
 @media (max-width:600px){.stat-num{font-size:40px}
 .now{display:flex;flex-direction:column}.now .stats{display:contents}.now .stat{margin:0 0 16px}
-.now .stat.fact{order:-2}.now .headline{order:-1}}
+.now .stat.fact{order:-2}.now .headline{order:-1}.now .stat.model{display:none}
+.headline .big{font-size:32px;line-height:1;font-variant-numeric:tabular-nums}
+.headline .sent{display:block}.headline .sent+.sent{margin-top:.8em}}
 .bar{display:inline-block;width:56px;height:8px;margin-right:8px;background:var(--grid);border-radius:4px;overflow:hidden;vertical-align:middle}
 .bar i{display:block;height:100%;background:var(--s1)}
 .tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}
