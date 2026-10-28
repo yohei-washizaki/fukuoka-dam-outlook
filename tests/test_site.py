@@ -88,6 +88,28 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<link rel="apple-touch-icon" href="apple-touch-icon.png"', page)
             self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
 
+    def test_morning_estimate_before_the_status_page(self):
+        no_reserve(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            norm = Path(tmp)
+            days = [("2026-10-21", 50000, 0, None), ("2026-10-22", 50500, 500, None), ("2026-10-23", 51000, 500, None)]
+            write(norm / "dam_storage.csv", TABLE_COLUMNS["dam_storage"], storage_rows(days))
+            # Printed through 10/22 with 2000 m³ of reserve; 10/23 9:00 is known only from BODIK.
+            write(norm / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"], excl_rows(days[:2], reserve_m3=2000))
+            page = site.section_now(site.load(norm, norm / "f", norm / "v", norm / "events.csv"))
+            self.assertIn("速報（推定）", page)
+            self.assertIn("10/23 9時", page)
+            self.assertIn("49.00%", page)  # (51000 - 2000) / 100000
+            self.assertIn("前回（10/22）から +0.50ポイント", page)
+            self.assertIn("10/22の渇水対策容量分を引いた推定", page)
+            self.assertIn("含む9ダム合計は51.00%（10/23）", page)
+            # Once the status page prints 10/23, the printed value replaces the estimate.
+            write(norm / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"], excl_rows(days, reserve_m3=2100))
+            page = site.section_now(site.load(norm, norm / "f", norm / "v", norm / "events.csv"))
+            self.assertNotIn("速報", page)
+            self.assertIn("公表値", page)
+            self.assertIn("48.90%", page)
+
     def test_excl_lines(self):
         def v(pct, published=False, sources=""):
             return {"pct": pct, "published": published, "sources": sources}

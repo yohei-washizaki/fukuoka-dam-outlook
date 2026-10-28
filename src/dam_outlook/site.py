@@ -348,18 +348,30 @@ def section_now(data: dict) -> str:
     pub = published_excl(data)
     if not pub:
         return '<section><h2>現在の貯水率</h2><p class="muted">データがまだありません。</p></section>'
-    d = pub[-1]
+    # Until the status page prints the day's value (weekdays after 13:00), the day's 9:00 total
+    # from BODIK minus the reserve of the last printed day stands in, marked as an estimate.
+    latest = data["latest_date"]
+    early = latest is not None and latest > pub[-1] and latest in data["excl"]
+    d = latest if early else pub[-1]
+    prev_d = pub[-1] if early else (pub[-2] if len(pub) > 1 else None)
     cur = data["excl"][d]
     # Change since the previous printed day (none on weekends, so not always yesterday);
     # left out when that is weeks back (a report before the status page was fetched).
     delta = ""
-    if len(pub) > 1 and (date.fromisoformat(d) - date.fromisoformat(pub[-2])).days <= DELTA_MAX_DAYS:
-        prev = data["excl"][pub[-2]]
+    if prev_d and (date.fromisoformat(d) - date.fromisoformat(prev_d)).days <= DELTA_MAX_DAYS:
+        prev = data["excl"][prev_d]
         dm = cur["storage_m3"] - prev["storage_m3"]
-        delta = f"<br>前回（{md(pub[-2])}）から {cur['pct'] - prev['pct']:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
-    tiles = [f"""<div class="stat fact"><div class="stat-label">現在の貯水率 <span class="badge fact">公表値</span></div>
+        delta = f"<br>前回（{md(prev_d)}）から {cur['pct'] - prev['pct']:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
+    if early:
+        badge = '<span class="badge est">速報（推定）</span>'
+        basis = f"<br>市の公表前の速報値から、{md(pub[-1])}の渇水対策容量分を引いた推定です。"
+        incl_pct = data["total"][d]["storage_pct"]
+    else:
+        badge, basis = '<span class="badge fact">公表値</span>', ""
+        incl_pct = cur.get("incl_storage_pct")
+    tiles = [f"""<div class="stat fact"><div class="stat-label">現在の貯水率 {badge}</div>
 <div class="stat-num">{cur["pct"]:.2f}%</div>
-<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}（渇水対策容量分を除く）{delta}</div></div>"""]
+<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}（渇水対策容量分を除く）{delta}{basis}</div></div>"""]
 
     sc, bl = data["scenario"], data["baseline"]
     head = ""
@@ -383,7 +395,7 @@ def section_now(data: dict) -> str:
         f'<td class="num">{f"{int(r["change_m3"]) / 10000:+,.1f}万m³" if r["change_m3"] else "—"}</td></tr>'
         for r in data["dams"] if r["storage_pct"]
     )
-    incl = f"渇水対策容量分を含む9ダム合計は{cur['incl_storage_pct']:.2f}%（{md(d)}）です。" if cur.get("incl_storage_pct") else ""
+    incl = f"渇水対策容量分を含む9ダム合計は{float(incl_pct):.2f}%（{md(d)}）です。" if incl_pct not in (None, "") else ""
     return f"""<section>
 {f'<p class="headline">{head}</p>' if head else ""}
 <div class="stats">{"".join(tiles)}</div>
@@ -609,7 +621,7 @@ h3{font-size:14px;margin:12px 0 0}
 .bar i{display:block;height:100%;background:var(--s1)}
 .tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}
 .badge{font-size:11px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--border);color:var(--ink2)}
-.badge.fact{border-color:var(--s1)}.badge.model{border-color:var(--s2)}.badge.warn{border-color:var(--warn)}
+.badge.fact{border-color:var(--s1)}.badge.est{border-color:var(--s1);border-style:dashed}.badge.model{border-color:var(--s2)}.badge.warn{border-color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0;display:block;overflow-x:auto}
 th,td{padding:4px 8px;border-bottom:1px solid var(--grid);text-align:left;white-space:nowrap}
 .num{text-align:right;font-variant-numeric:tabular-nums}
