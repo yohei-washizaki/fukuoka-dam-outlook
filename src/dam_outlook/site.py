@@ -5,6 +5,9 @@ Run: ``PYTHONPATH=src python -m dam_outlook.site`` (writes ``site/index.html``)
 Published values and model outputs are labelled separately on the page.
 Charts are inline SVG; a small inline script adds the hover tooltip.
 
+The footer shows the last successful fetch (from the raw fetch log), not the
+build time, so a rebuild with unchanged data does not look like an update.
+
 Rates are of the 9-dam total excluding the drought reserve (渇水対策容量分を除く),
 as the city's status page leads with; days it was not printed are estimates
 (reserve.py) and are drawn dashed. The per-dam table includes the reserve.
@@ -49,7 +52,25 @@ def fmt_m3(v) -> str:
 # ---------------------------------------------------------------- data
 
 
-def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, events_path: Path) -> dict:
+def last_fetch(raw_dir: Path | None) -> datetime | None:
+    """Time of the newest successful fetch in the fetch log (data/raw/_log/<YYYY-MM>.jsonl)."""
+    logs = sorted((raw_dir / "_log").glob("*.jsonl")) if raw_dir else []
+    for log in reversed(logs):
+        times = []
+        for line in log.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+                if rec.get("status") == 200:
+                    times.append(datetime.fromisoformat(rec["fetched_at"]))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if times:
+            return max(times).astimezone(JST)
+    return None
+
+
+def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, events_path: Path,
+         raw_dir: Path | None = None) -> dict:
     storage = read_csv(normalized_dir / "dam_storage.csv")
     total = {r["date"]: r for r in storage if r["dam_id"] == "total"}
     latest_date = max(total) if total else None
@@ -71,6 +92,7 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
     return {
         "total": total,
         "latest_date": latest_date,
+        "fetched_at": last_fetch(raw_dir),
         "excl": excl,
         "dams": dams,
         "scenario": latest_of(SCENARIO),
@@ -640,9 +662,10 @@ hit.addEventListener('pointermove',show);hit.addEventListener('pointerdown',show
 """
 
 
-def render(data: dict, now: datetime) -> str:
+def render(data: dict) -> str:
     # Icon links are relative so the page also works under a path (the canvas preview, ops/canvas/).
     body = "\n".join([section_now(data), section_outlook(data), section_history(data), section_verification(data)])
+    fetched = f"{data['fetched_at']:%Y-%m-%d %H:%M} データ取得。" if data["fetched_at"] else ""
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
@@ -651,7 +674,7 @@ def render(data: dict, now: datetime) -> str:
 <p class="sub">公表されたデータと、それを元にした独自の予想を趣味で掲載しています。</p>
 {body}
 <footer>
-<p>{now:%Y-%m-%d %H:%M} 更新。福岡市水道局・気象庁とは関係ありません。内容の正確さは保証しません。</p>
+<p>{fetched}福岡市水道局・気象庁とは関係ありません。内容の正確さは保証しません。</p>
 <p>出典: 福岡市水道局「きょうのダム状況」「きょうのダム状況（テキスト版）」「浄水日報」、市議会への報告資料「水事情について」。<br>
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
@@ -682,11 +705,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--forecast-dir", type=Path, default=Path("data/forecasts"))
     parser.add_argument("--verification-dir", type=Path, default=Path("data/verification"))
     parser.add_argument("--events", type=Path, default=Path("data/curated/events.csv"))
+    parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("--out", type=Path, default=Path("site/index.html"))
     args = parser.parse_args(argv)
-    data = load(args.normalized_dir, args.forecast_dir, args.verification_dir, args.events)
+    data = load(args.normalized_dir, args.forecast_dir, args.verification_dir, args.events, args.raw_dir)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(render(data, datetime.now(JST)), encoding="utf-8")
+    args.out.write_text(render(data), encoding="utf-8")
     (args.out.parent / "robots.txt").write_text("User-agent: *\nAllow: /\n", encoding="utf-8")
     # Cloudflare Pages serves index.html for unknown paths unless a 404.html exists.
     (args.out.parent / "404.html").write_text(NOT_FOUND, encoding="utf-8")

@@ -17,10 +17,24 @@ class SiteTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             data = site.load(tmp, tmp / "f", tmp / "v", tmp / "events.csv")
-            page = site.render(data, datetime(2026, 10, 25, tzinfo=JST))
+            page = site.render(data)
             self.assertIn("データがまだありません", page)
+            self.assertNotIn("データ取得", page)  # no fetch log
             self.assertIn("予想はまだ発行されていません", page)
             self.assertNotIn('class="water"', page)  # no published rate, no water
+
+    def test_footer_shows_last_successful_fetch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "raw" / "_log").mkdir(parents=True)
+            (tmp / "raw" / "_log" / "2026-09.jsonl").write_text(
+                '{"fetched_at": "2026-09-30T18:07:00+09:00", "status": 200}\n', encoding="utf-8")
+            (tmp / "raw" / "_log" / "2026-10.jsonl").write_text(
+                '{"fetched_at": "2026-10-28T12:45:54+09:00", "status": 200}\n'
+                '{"fetched_at": "2026-10-28T12:46:10+09:00", "status": 503}\n'
+                'not json\n', encoding="utf-8")
+            data = site.load(tmp, tmp / "f", tmp / "v", tmp / "events.csv", tmp / "raw")
+            self.assertIn("2026-10-28 12:45 データ取得。", site.render(data))
 
     def test_page_with_forecasts(self):
         no_reserve(self)
@@ -42,7 +56,7 @@ class SiteTest(unittest.TestCase):
             forecast.issue(norm, tmp / "f", datetime(2026, 10, 22, 14, 45, tzinfo=JST))
             (norm / "dam_storage_chart.csv").unlink()  # keep the history chart to the published days
             data = site.load(norm, tmp / "f", tmp / "v", events)
-            page = site.render(data, datetime(2026, 10, 22, 15, tzinfo=JST))
+            page = site.render(data)
             self.assertIn("モデル出力", page)
             self.assertIn("公表値", page)
             self.assertIn("&lt;15%&gt;", page)  # escaped

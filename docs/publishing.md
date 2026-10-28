@@ -4,6 +4,7 @@
 
 - 配信先は Cloudflare Pages（プロジェクト `dam-outlook`、`https://dam-outlook.pages.dev/`）の Git 連携。`main` への push（Actions の自動コミットを含む）ごとに Cloudflare が `PYTHONPATH=src python3 -m dam_outlook.site` を実行し、`site/`（`index.html` と `robots.txt`）だけを配信する。Cloudflare の GitHub アプリはリポジトリ全体を読めるが、公開されるのは `site/` だけ。API トークンは使わない。
 - Cloudflare のプレビューは使わない（2026-10-27 にオフにした）。`<branch>.dam-outlook.pages.dev` は URL を知っていれば誰でも見られ、ブランチを消しても残るため。PR のプレビューは canvas で非公開に作る（`.github/workflows/preview.yml`、`ops/canvas/README.md`）。2026-10-25〜27 は `preview/*` のブランチだけをプレビューしていた。
+- サイトに関係しない変更ではビルドしない（2026-10-28、Cloudflare の Build watch paths）。含める: `*`、除く: `*.md`・`docs/*`・`.github/*`・`tests/*`・`ops/*`。Cloudflare の `*` は `/` もまたぐ。除いたファイルだけの push（ワークフローや文書の変更）ではデプロイされない。サイトが読むファイル（`src/`・`data/`）を足すときは、除く側に入っていないか確かめる。ページ最下部の時刻はビルド時刻ではなく、取得ログ（`data/raw/_log/`）の最後に成功した取得の時刻。
 - このリポジトリは private のまま（`data/raw/` に福岡市のページ・PDF の写しがあるため）。
 - 福岡市水道局には問い合わせない。代わりに、市のページへはリンクせず、出典は名称だけを書く。
 - 2026-10-25〜26 は `noindex,nofollow` と `robots.txt` で検索に出さなかった。気象庁の回答（下の Open）を受けて、2026-10-26 に外した。404 ページは `noindex` のまま。プレビューは Cloudflare が `X-Robots-Tag: noindex` を付ける。
