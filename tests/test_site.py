@@ -68,18 +68,23 @@ class SiteTest(unittest.TestCase):
             labels = re.findall(r'restrict-label"[^>]*>([^<]*)</text>', page)
             # The 15% segment of the phone-sized outlook chart is too narrow for any label.
             self.assertEqual(sum(x in ("取水制限 15%（1/15〜）（未確認）", "取水制限 15%（未確認）", "15%") for x in labels), 3)
-            # Summary tiles: the published rate, then the model's 28-day forecast.
-            self.assertEqual(re.findall(r'<div class="stat (\w+)">', page), ["fact", "model"])
+            # The published rate comes first, then the outlook sentence; no forecast tile.
+            self.assertEqual(re.findall(r'<div class="stat (\w+)">', page), ["fact"])
+            self.assertLess(page.index('<div class="stat fact">'), page.index('<p class="headline">'))
             self.assertIn("前回（10/21）から", page)
             # The background fills to the latest published rate.
             latest = data["excl"][site.published_excl(data)[-1]]["pct"]
             self.assertIn(f'<div class="fill" style="--level:{latest:.2f}">', page)
-            self.assertIn("4週間後（11/19）の予想", page)
             self.assertIn('<p class="headline"><span class="sent"><span class="ph">4週間後（11/19）の</span><span class="ph">貯水率は、</span>', page)
             self.assertIn('でしょう。</span>', page)
             self.assertIn('"筑後川取水制限": "55%"', page)
             self.assertIn("を下回る", page)
             self.assertIn("scenario_jma_tercile v2", page)
+            # The no-rain line is the fitted model without rain; the naive baseline is only a reference.
+            nr = data["norain"]["forecast"][-1]["storage_pct"]
+            self.assertIn(f'雨が降らなければ、</span><span class="ph"><span class="norain">{nr:.0f}%</span>', page)
+            self.assertIn("scenario_norain v1", page)
+            self.assertIn("水準のぶれを加えずに1通りだけ計算", page)
             self.assertIn("最小二乗法で推定", page)
             self.assertIn("2,000通り", page)
             self.assertNotIn("過去にさかのぼった検証", page)  # no hindcast.csv here

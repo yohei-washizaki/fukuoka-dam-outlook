@@ -32,6 +32,7 @@ from .raw_store import JST
 
 SCENARIO = "scenario_jma_tercile"
 BASELINE = "baseline_norain"
+NORAIN = "scenario_norain"
 HISTORY_DAYS = 365
 
 DAM_ORDER = ["minamihata", "gokayama", "sefuri", "magarifuchi", "egawa", "kubara", "nagatani", "inono", "zuibaiji"]
@@ -97,6 +98,7 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
         "dams": dams,
         "scenario": latest_of(SCENARIO),
         "baseline": latest_of(BASELINE),
+        "norain": latest_of(NORAIN),
         "n_forecasts": len(forecasts),
         "summary": read_csv(verification_dir / "summary.csv"),
         "hindcast": read_csv(verification_dir / "hindcast.csv"),
@@ -369,11 +371,11 @@ def section_now(data: dict) -> str:
     else:
         badge, basis = '<span class="badge fact">公表値</span>', ""
         incl_pct = cur.get("incl_storage_pct")
-    tiles = [f"""<div class="stat fact"><div class="stat-label">現在の貯水率 {badge}</div>
+    tile = f"""<div class="stat fact"><div class="stat-label">現在の貯水率 {badge}</div>
 <div class="stat-num">{cur["pct"]:.2f}%</div>
-<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}（渇水対策容量分を除く）{delta}{basis}</div></div>"""]
+<div class="stat-sub">{md(d)} 9時・{fmt_m3(cur["storage_m3"])}（渇水対策容量分を除く）{delta}{basis}</div></div>"""
 
-    sc, bl = data["scenario"], data["baseline"]
+    sc, bl = data["scenario"], data["norain"]
     head = ""
     last = sc["forecast"][-1] if sc else None
     bl_last = bl["forecast"][-1] if bl else None
@@ -383,8 +385,6 @@ def section_now(data: dict) -> str:
         head = phrases(f"{when}の", "貯水率は、", *trend_phrase(now_pct, last["storage_pct_p50"]))
         if bl_last and bl_last["horizon_days"] == last["horizon_days"]:
             head += phrases(*no_rain_phrase(now_pct, bl_last["storage_pct"]))
-        tiles.append(f"""<div class="stat model"><div class="stat-label">{when}の予想 <span class="badge model">モデル出力</span></div>
-<div class="stat-num">{last["storage_pct_p50"]:.0f}%前後</div></div>""")
     elif bl_last:
         head = phrases(f'{weeks_or_days(bl_last["horizon_days"])}（{md(bl_last["date"])}）まで', *no_rain_phrase(now_pct, bl_last["storage_pct"]))
 
@@ -397,8 +397,8 @@ def section_now(data: dict) -> str:
     )
     incl = f"渇水対策容量分を含む9ダム合計は{float(incl_pct):.2f}%（{md(d)}）です。" if incl_pct not in (None, "") else ""
     return f"""<section class="now">
+{tile}
 {f'<p class="headline">{head}</p>' if head else ""}
-<div class="stats">{"".join(tiles)}</div>
 <details><summary>渇水対策容量とは</summary>
 <p class="note">ふだんの渇水では使わずに残しておく、異常渇水のときのための水の備蓄です。五ケ山ダムと江川ダムにあり、容量は合わせて{fmt_m3(RESERVE_CAPACITY_M3)}です。このサイトの貯水率は、福岡市の「きょうのダム状況」と同じく、これを除いた値です。{incl}</p>
 </details>
@@ -410,7 +410,7 @@ def section_now(data: dict) -> str:
 
 
 def section_outlook(data: dict) -> str:
-    sc, bl = data["scenario"], data["baseline"]
+    sc, bl = data["scenario"], data["norain"]
     f = sc or bl
     if not f:
         return '<section><h2>予想</h2><p class="muted">予想はまだ発行されていません。</p></section>'
@@ -460,7 +460,7 @@ def section_outlook(data: dict) -> str:
 </details>"""
 
     issued = datetime.fromisoformat(f["issued_at"]).astimezone(JST)
-    models = " / ".join(f'{esc(x["model"])} v{esc(x["model_version"])}' for x in (sc, bl) if x)
+    models = " / ".join(f'{esc(x["model"])} v{esc(x["model_version"])}' for x in (sc, bl, data["baseline"]) if x)
     return f"""<section>
 <h2>予想 <span class="badge model">モデル出力</span></h2>
 {chart}
@@ -469,7 +469,7 @@ def section_outlook(data: dict) -> str:
 {tables}
 <details><summary>計算方法</summary>
 <p class="note">過去の同じ季節に降った雨を、1か月予報の確率で重み付けして使っています。</p>
-{method_details(sc, bl, data["hindcast"])}
+{method_details(sc, bl, data["baseline"], data["hindcast"])}
 <p class="note">モデル: {models}。</p>
 </details>
 </section>"""
@@ -479,11 +479,14 @@ def ym(d: str) -> str:
     return f"{int(d[:4])}年{int(d[5:7])}月"
 
 
-def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> str:
+NORAIN_NOTE = ('<p class="note">雨なしは、同じ計算でこの先の雨を0とし、水準のぶれを加えずに1通りだけ計算したものです。'
+               '降った雨の流れ込みが少しずつ減り、その後は水準のペースで減ります。'
+               '80%の範囲の下側が雨なしより下になるのは、水準が今より下がる場合を含めているためです。</p>')
+
+
+def method_details(sc: dict | None, nr: dict | None, bl: dict | None, hindcast: list[dict]) -> str:
     """How the outlook is computed, with this forecast's fitted values and the hindcast scores."""
     parts = []
-    if bl:
-        parts.append('<p class="note">雨なし: この先雨が降らない場合です。直近14日のうち雨のなかった日の減り方（中央値）が、この先も続くとして計算しています。</p>')
     if not sc:
         return "\n".join(parts)
     pr = sc["params"]
@@ -502,6 +505,7 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
 <li>ここまでは実際にたまっている水の量（渇水対策容量分を含む）で計算し、最後に渇水対策容量分を引きます。今回は{md(sc["inputs"]["reserve_date"])}時点の{man(sc["inputs"]["reserve_m3"])}で、予想期間中は変わらないとしています。</li>
 <li>水準が今後ずれる分として、1日あたり平均0・標準偏差{man(pr["level_sigma_m3_per_day"])}のぶれを加え、{pr["n_sims"]:,}通り計算します。その中央値、10〜90%の範囲（80%の範囲）、閾値を下回る割合を表に示しています。</li>
 </ol>
+{NORAIN_NOTE if nr else ""}
 <p class="note">予想に入っていないこと: 取水制限の強化・解除などで水準が急に変わること、渇水対策容量分の取り崩しや回復、予想期間中の利水容量の切り替え。</p>""")
     hc = {(r["model"], r["horizon_days"]): r for r in hindcast
           if (r["model"], r["model_version"]) in ((sc["model"], sc["model_version"]), (bl["model"], bl["model_version"]) if bl else (None, None))}
@@ -517,8 +521,8 @@ def method_details(sc: dict | None, bl: dict | None, hindcast: list[dict]) -> st
                      f'<td class="num">{fmt_m3(r["crps_approx_m3"])}</td>'
                      f'<td class="num">{100 * float(r["p10_p90_coverage"]):.0f}%</td></tr>')
         parts.append(f"""<p class="note">過去にさかのぼった検証: {ym(first["first_base"])}〜{ym(first["last_base"])}の毎週（{esc(first["n"])}回）について、その日までのデータだけで予想し直し、実績と比べました。雨のシナリオからはその年を除き、当時の1か月予報は残っていないため3つの区分を同じ重みにしています。</p>
-<table><thead><tr><th></th><th>中央値の誤差</th><th>雨なしの誤差</th><th>CRPS</th><th>80%の範囲に入った割合</th></tr></thead><tbody>{rows}</tbody></table>
-<p class="note">誤差は貯水量の平均絶対誤差です。CRPS は範囲も含めた予想全体の外れ具合で、小さいほど良く、雨なしの計算では誤差と同じ値になります。この期間は雨が少なかったため、中央値は雨なしの計算より外れました。</p>""")
+<table><thead><tr><th></th><th>中央値の誤差</th><th>単純な外挿の誤差</th><th>CRPS</th><th>80%の範囲に入った割合</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">誤差は貯水量の平均絶対誤差です。単純な外挿は、直近14日のうち雨のなかった日の減り方の中央値をそのまま延ばした比較用の計算です。CRPS は範囲も含めた予想全体の外れ具合で、小さいほど良い値です。</p>""")
     parts.append('<p class="note">発行した予想は、使った入力と一緒に書き換えずに保存し、下の「検証」で実績と比べます。</p>')
     return "\n".join(parts)
 
@@ -569,8 +573,8 @@ def section_verification(data: dict) -> str:
             f'<td class="num">{esc(r["p10_p90_coverage"]) or "—"}</td><td class="num">{esc(r["brier_mean"]) or "—"}</td></tr>'
             for r in s
         )
-        body = f"""<table><thead><tr><th>モデル</th><th>何日先</th><th>件数</th><th>平均絶対誤差</th><th>雨なし比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
-<p class="note">雨なし比スキル = 1 − 誤差 ÷ 雨が降らない場合の誤差（0より大きければ良い）。80%範囲の的中率は 0.8 に近いほど適切です。Brier は閾値を下回る確率の誤差です（0 が最良）。</p>"""
+        body = f"""<table><thead><tr><th>モデル</th><th>何日先</th><th>件数</th><th>平均絶対誤差</th><th>単純な外挿比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">単純な外挿比スキル = 1 − 誤差 ÷ 単純な外挿の誤差（0より大きければ良い）。単純な外挿は、直近14日のうち雨のなかった日の減り方の中央値をそのまま延ばした比較用の計算です。80%範囲の的中率は 0.8 に近いほど適切です。Brier は閾値を下回る確率の誤差です（0 が最良）。</p>"""
     return f'<section><h2>検証 <span class="badge model">モデル評価</span></h2>{body}</section>'
 
 
@@ -609,18 +613,14 @@ section{background:color-mix(in srgb,var(--surface) 70%,transparent);-webkit-bac
 border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
 .sub,.note,.muted{color:var(--ink2);font-size:13px;margin:4px 0}.muted{color:var(--muted)}
 h3{font-size:14px;margin:12px 0 0}
-.headline{font-size:20px;font-weight:600;line-height:1.55;margin:0 0 12px}
-.headline .sent,.headline .ph{display:inline-block}.headline .model{color:var(--s2)}.headline .norain{color:var(--s3)}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 24px;margin:8px 0}
-.stat{border-left:3px solid var(--s1);padding:2px 0 2px 12px}.stat.model{border-left-color:var(--s2)}
+.headline{font-size:20px;font-weight:600;line-height:1.55;margin:16px 0 12px}
+.headline .sent{display:block}.headline .sent+.sent{margin-top:.8em}.headline .ph{display:inline-block}
+.headline .big{font-size:32px;line-height:1;font-variant-numeric:tabular-nums}.headline .model{color:var(--s2)}.headline .norain{color:var(--s3)}
+.stat{border-left:3px solid var(--s1);padding:2px 0 2px 12px;margin:8px 0}
 .stat-label{font-size:13px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .stat-num{font-size:48px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums}
-.stat-sub{font-size:13px;color:var(--ink2)}.stat.model .stat-num{color:var(--s2)}
-@media (max-width:600px){.stat-num{font-size:40px}
-.now{display:flex;flex-direction:column}.now .stats{display:contents}.now .stat{margin:0 0 16px}
-.now .stat.fact{order:-2}.now .headline{order:-1}.now .stat.model{display:none}
-.headline .big{font-size:32px;line-height:1;font-variant-numeric:tabular-nums}
-.headline .sent{display:block}.headline .sent+.sent{margin-top:.8em}}
+.stat-sub{font-size:13px;color:var(--ink2)}
+@media (max-width:600px){.stat-num{font-size:40px}}
 .bar{display:inline-block;width:56px;height:8px;margin-right:8px;background:var(--grid);border-radius:4px;overflow:hidden;vertical-align:middle}
 .bar i{display:block;height:100%;background:var(--s1)}
 .tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}

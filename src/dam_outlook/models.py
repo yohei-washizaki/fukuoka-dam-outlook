@@ -374,6 +374,40 @@ def fit_storage_model(obs: dict, base: date) -> dict | None:
     }
 
 
+def _storage_path(fit: dict, s0: float, base: date, horizon: int, level: float,
+                  rain: dict[date, float], future: dict[date, float], ex: dict) -> list[float]:
+    """Storage excluding the reserve for each day after ``base``, from the fitted storage model.
+
+    Rain is the observed value when there is one, else ``future`` (0 when absent).
+    Total storage is capped to [0, capacity] before the reserve is subtracted.
+    """
+    decay = math.exp(-1 / SLOW_TAU_DAYS)
+    quick, slow_coef = fit["quick_m3_per_mm"], fit["slow_m3_per_mm"]
+    total_capacity = ex["incl_capacity_m3"]
+
+    def rain_at(d: date) -> float:
+        return rain[d] if d in rain else future.get(d, 0.0)
+
+    s, b, path = s0, fit["slow_state"][base], []
+    for h in range(1, horizon + 1):
+        t = base + timedelta(days=h)
+        b = b * decay + rain_at(t - timedelta(days=QUICK_LAGS)) / SLOW_TAU_DAYS
+        change = level + sum(q * rain_at(t - timedelta(days=j)) for j, q in enumerate(quick)) + slow_coef * b
+        s = min(max(s + change, 0), total_capacity or float("inf"))
+        path.append(_excl(s, ex))
+    return path
+
+
+def _fit_params(fit: dict) -> dict:
+    """The fitted values for ``params``, rounded."""
+    params = {k: v for k, v in fit.items() if k not in ("slow_state", "training_sha256")}
+    for k in ("const_m3_per_day", "slow_m3_per_mm", "level_m3_per_day", "level_sigma_m3_per_day"):
+        params[k] = round(params[k], 1)
+    params["quick_m3_per_mm"] = [round(v, 1) for v in params["quick_m3_per_mm"]]
+    params.update({"slow_tau_days": SLOW_TAU_DAYS, "full_share": FULL_SHARE})
+    return params
+
+
 def analog_windows(rain: dict[date, float], base: date, horizon: int) -> list[dict]:
     """Observed rain of the ``horizon`` days after dates near the same calendar day in other years."""
     out = []
@@ -416,7 +450,6 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
     ex = excl_base(obs, base)
     if cur is None or ex is None:
         return None
-    total_capacity = ex["incl_capacity_m3"]
     capacity = ex["capacity_m3"]
     fit = fit_storage_model(obs, base)
     rain = obs["rain_daily"]
@@ -449,26 +482,13 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
     }
     seed = int(hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:16], 16)
     rng = random.Random(seed)
-    decay = math.exp(-1 / SLOW_TAU_DAYS)
-    quick, slow_coef = fit["quick_m3_per_mm"], fit["slow_m3_per_mm"]
     sigma = fit["level_sigma_m3_per_day"]
     paths = []
     for _ in range(N_SIMS):
         w = rng.choices(windows, weights=win_w)[0]
         level = fit["level_m3_per_day"] + rng.gauss(0, sigma)
         future = {base + timedelta(days=h + 1): v for h, v in enumerate(w["rain_mm"])}
-
-        def rain_at(d: date) -> float:  # observed when available, else the drawn sequence
-            return rain[d] if d in rain else future.get(d, 0.0)
-
-        s, b, path = s0, fit["slow_state"][base], []
-        for h in range(1, horizon + 1):
-            t = base + timedelta(days=h)
-            b = b * decay + rain_at(t - timedelta(days=QUICK_LAGS)) / SLOW_TAU_DAYS
-            change = level + sum(q * rain_at(t - timedelta(days=j)) for j, q in enumerate(quick)) + slow_coef * b
-            s = min(max(s + change, 0), total_capacity or float("inf"))
-            path.append(_excl(s, ex))
-        paths.append(path)
+        paths.append(_storage_path(fit, s0, base, horizon, level, rain, future, ex))
 
     series = []
     for h in range(1, horizon + 1):
@@ -487,13 +507,8 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
                 str(t): round(sum(v < capacity * t / 100 for v in vals) / len(vals), 3) for t in THRESHOLDS_PCT
             }
         series.append(row)
-    params = {k: v for k, v in fit.items() if k not in ("slow_state", "training_sha256")}
-    for k in ("const_m3_per_day", "slow_m3_per_mm", "level_m3_per_day", "level_sigma_m3_per_day"):
-        params[k] = round(params[k], 1)
-    params["quick_m3_per_mm"] = [round(v, 1) for v in params["quick_m3_per_mm"]]
+    params = _fit_params(fit)
     params.update({
-        "slow_tau_days": SLOW_TAU_DAYS,
-        "full_share": FULL_SHARE,
         "category_weights": weights,
         "analog_half_window_days": ANALOG_HALF_WINDOW_DAYS,
         "analog_windows_n": len(windows),
@@ -503,8 +518,49 @@ def scenario_jma_tercile(obs: dict, base: date, as_of: datetime, horizon: int = 
     return {"inputs": inputs, "params": params, "forecast": series}
 
 
+def scenario_norain(obs: dict, base: date, as_of: datetime | None = None, horizon: int = HORIZON_DAYS) -> dict | None:
+    """Storage excluding the drought reserve if no rain falls after the base date.
+
+    The same storage model as scenario_jma_tercile (fit_storage_model), run
+    once with no future rain and no level offset: the inflow of the rain
+    already fallen fades on its fitted delay, and storage then falls at the
+    fitted level. Days already observed after the base date use the observed
+    rain. This is the no-rain line on the site; baseline_norain stays the
+    naive reference for verification.
+    """
+    cur = obs["total"].get(base.isoformat())
+    ex = excl_base(obs, base)
+    if cur is None or ex is None:
+        return None
+    fit = fit_storage_model(obs, base)
+    if fit is None:
+        return None
+    rain = obs["rain_daily"]
+    capacity = ex["capacity_m3"]
+    path = _storage_path(fit, cur["storage_m3"], base, horizon, fit["level_m3_per_day"], rain, {}, ex)
+    series = [
+        {
+            "date": (base + timedelta(days=h)).isoformat(),
+            "horizon_days": h,
+            "storage_m3": round(s),
+            "storage_pct": round(100 * s / capacity, 2) if capacity else None,
+        }
+        for h, s in enumerate(path, start=1)
+    ]
+    inputs = {
+        "base_date": base.isoformat(),
+        "base_storage_m3": cur["storage_m3"],
+        **ex,
+        "training_sha256": fit["training_sha256"],
+        "slow_state_mm": round(fit["slow_state"][base], 4),
+        "observed_rain_mm": {d.isoformat(): rain[d] for d in sorted(rain) if base - timedelta(days=QUICK_LAGS) < d},
+    }
+    return {"inputs": inputs, "params": _fit_params(fit), "forecast": series}
+
+
 # name -> (version, function). Bump the version whenever a model's behavior changes.
 MODELS: dict[str, tuple[str, Callable[[dict, date, datetime], dict | None]]] = {
     "baseline_norain": ("2", baseline_norain),
     "scenario_jma_tercile": ("2", scenario_jma_tercile),
+    "scenario_norain": ("1", scenario_norain),
 }

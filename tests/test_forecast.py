@@ -229,6 +229,24 @@ class ScenarioTest(unittest.TestCase):
         self.obs["history"] = {}
         self.assertIsNone(models.scenario_jma_tercile(self.obs, self.base, self.as_of))
 
+    def test_norain_follows_the_fitted_model_without_future_rain(self):
+        r = models.scenario_norain(self.obs, self.base, horizon=10)
+        fit = models.fit_storage_model(self.obs, self.base)
+        expect = models._storage_path(fit, r["inputs"]["base_storage_m3"], self.base, 10,
+                                      fit["level_m3_per_day"], self.rain, {}, models.excl_base(self.obs, self.base))
+        self.assertEqual([p["storage_m3"] for p in r["forecast"]], [round(s) for s in expect])
+        # Day 1 still gets the base day's rain (lag 1); after the fallen rain fades, storage falls by the level.
+        last = [p["storage_m3"] for p in r["forecast"][-3:]]
+        self.assertLess(last[1], last[0])
+        self.assertLess(last[2] - last[1], 0)
+
+    def test_norain_is_not_above_the_scenario_median(self):
+        self.obs["rain_daily"].update({d - timedelta(days=365): v for d, v in self.rain.items()})
+        nr = models.scenario_norain(self.obs, self.base, horizon=10)
+        sc = models.scenario_jma_tercile(self.obs, self.base, self.as_of, horizon=10)
+        for n, s in zip(nr["forecast"], sc["forecast"]):
+            self.assertLessEqual(n["storage_m3"], s["storage_m3_p50"])
+
 
 class HindcastTest(unittest.TestCase):
     def test_cut_hides_the_future_and_the_base_year(self):
