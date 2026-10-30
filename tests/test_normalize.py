@@ -277,7 +277,6 @@ class DamHourlyCsvTest(unittest.TestCase):
         self.assertEqual(len(tables.warnings), 1)
 
 
-@unittest.skipUnless(__import__("importlib").util.find_spec("pypdf"), "pypdf not installed")
 class PdfTextTest(unittest.TestCase):
     def test_raw_nippou_pdfs_parse(self):
         pdfs = sorted(Path("data/raw/city_nippou").glob("*/*.pdf"))[:3]
