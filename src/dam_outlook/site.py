@@ -608,7 +608,10 @@ CSS = """
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif}
 main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0 0 8px;display:flex;gap:8px;align-items:center}
+h1{font-size:36px;line-height:1.35;margin:0 0 4px}h1 .ph{display:inline-block}
+h1 .emo{margin-right:.25em;font-size:.85em;font-weight:400;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+@media (max-width:600px){h1{font-size:min(30px,7.5vw)}}
+h2{font-size:17px;margin:0 0 8px;display:flex;gap:8px;align-items:center}
 section{background:color-mix(in srgb,var(--surface) 70%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
 border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0}
 .sub,.note,.muted{color:var(--ink2);font-size:13px;margin:4px 0}.muted{color:var(--muted)}
@@ -686,7 +689,7 @@ def render(data: dict) -> str:
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="福岡市関連9ダム合計の貯水率の推移と、28日先までの確率つきの予想。"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="apple-touch-icon.png"><title>福岡市ダム貯水率の予想サイト</title><style>{CSS}</style></head>
 <body>{water(data)}<main>
-<h1>福岡市ダム貯水率の予想サイト</h1>
+<h1><span class="emo" aria-hidden="true">💧📊</span><span class="ph">福岡市ダム貯水率の</span><span class="ph">予想サイト</span></h1>
 <p class="sub">公表されたデータと、それを元にした独自の予想を趣味で掲載しています。</p>
 {body}
 <footer>
