@@ -65,17 +65,27 @@ def _quantile_points(row: dict) -> list[tuple[float, float]]:
     return [(0.1, row["storage_m3_p10"]), (0.5, row["storage_m3_p50"]), (0.9, row["storage_m3_p90"])]
 
 
+def base_dates(hist: dict, excl: dict, rain: dict, start: date, step: int) -> list[date]:
+    """Days with the storage to score and the rain to start from.
+
+    Rain has a gap between the last settled JMA month and the AMeDAS point
+    data, and the model cannot start from a day inside it.
+    """
+    bases = []
+    d = start
+    while d + timedelta(days=max(HORIZONS)) <= max(hist):
+        if d in hist and d in excl and d in rain and all(d + timedelta(days=h) in excl for h in HORIZONS):
+            bases.append(d)
+        d += timedelta(days=step)
+    return bases
+
+
 def hindcast(normalized_dir: Path, start: date = START, step: int = STEP_DAYS) -> list[dict]:
     obs = load_observations(normalized_dir)
     hist, excl = obs["history"], obs["excl_history"]
     if not hist:
         return []
-    bases = []
-    d = start
-    while d + timedelta(days=max(HORIZONS)) <= max(hist):
-        if d in hist and d in excl and all(d + timedelta(days=h) in excl for h in HORIZONS):
-            bases.append(d)
-        d += timedelta(days=step)
+    bases = base_dates(hist, excl, obs["rain_daily"], start, step)
     scores: dict[tuple, list[tuple[float, float, bool]]] = {}
     for base in bases:
         known = cut(obs, base)
