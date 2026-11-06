@@ -241,6 +241,16 @@ class DamHourlyCsvTest(unittest.TestCase):
         with self.assertRaises(n.ParseError):
             n.parse_dam_hourly_csv("時刻,A,B\n")
 
+    def test_fetched_before_9am_has_no_daily_row(self):
+        head = HOURLY_CSV.splitlines()[0]
+        self.assertEqual(n.parse_dam_hourly_csv(f"{head}\n2026/11/01 07:00,3178,15030,1035,2366,4832,1048,3580,2019,1215,34303,\n"), {})
+
+    def test_missing_9am_row_raises(self):
+        head = HOURLY_CSV.splitlines()[0]
+        for rows in ("", "2026/11/01 10:00,3178,15030,1035,2366,4832,1048,3580,2019,1215,34303,\n"):
+            with self.assertRaises(n.ParseError):
+                n.parse_dam_hourly_csv(f"{head}\n{rows}")
+
     def test_ranked_below_daily_report(self):
         tables = n.Tables()
         d = date(2026, 10, 21)

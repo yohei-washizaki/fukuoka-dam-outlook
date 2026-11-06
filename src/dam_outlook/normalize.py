@@ -18,7 +18,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -499,6 +499,7 @@ def parse_dam_hourly_csv(text: str) -> dict[date, list[dict]]:
 
     The total is the sum of the dams: the CSV's own 合計 column was off by up to
     104千m³ for some hours in 2026-10, while the daily report's total equals the sum.
+    The file restarts each month, so one fetched before 9:00 on the 1st has no daily row yet.
     """
     rows = list(csv.reader(io.StringIO(text)))
     if not rows or rows[0][0] != "観測時刻":
@@ -508,10 +509,12 @@ def parse_dam_hourly_csv(text: str) -> dict[date, list[dict]]:
         raise ParseError(f"unexpected columns {rows[0]!r}")
     ids = [dam_id(nm) for nm in names[:-1]]
     out = {}
+    times = []
     for r in rows[1:]:
         if not r or not r[0]:
             continue
         t = datetime.strptime(r[0], "%Y/%m/%d %H:%M")
+        times.append(t.time())
         if t.hour != 9 or t.minute != 0:
             continue
         d = t.date()
@@ -523,7 +526,7 @@ def parse_dam_hourly_csv(text: str) -> dict[date, list[dict]]:
              "storage_pct": round(100 * v / capacity_m3(i, d), 2)}
             for i, v in m3.items()
         ]
-    if not out:
+    if not out and (not times or max(times) >= time(9)):
         raise ParseError("no 9:00 rows")
     return out
 
