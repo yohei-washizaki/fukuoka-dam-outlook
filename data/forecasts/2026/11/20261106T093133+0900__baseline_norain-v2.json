@@ -1,0 +1,281 @@
+{
+ "model": "baseline_norain",
+ "model_version": "2",
+ "issued_at": "2026-11-06T09:31:33+09:00",
+ "base_date": "2026-11-06",
+ "target": "storage_excl_reserve_m3",
+ "base_sources": "bodik_hourly",
+ "inputs_sha256": "42dcb08b9cc3646dd42c9351f24eff3f8f17c815e716497735cae27345a68737",
+ "inputs": {
+  "base_date": "2026-11-06",
+  "base_storage_m3": 35195000,
+  "base_excl_storage_m3": 19185000,
+  "reserve_m3": 16010000,
+  "reserve_date": "2026-11-05",
+  "reserve_source": "carried from 2026-11-05",
+  "capacity_m3": 55071000,
+  "incl_capacity_m3": 78347000,
+  "daily_changes": [
+   {
+    "date": "2026-10-24",
+    "change_m3": 101000,
+    "dry": false,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-25",
+    "change_m3": 28000,
+    "dry": false,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-10-26",
+    "change_m3": 1181000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-27",
+    "change_m3": 862000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-28",
+    "change_m3": 313000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-29",
+    "change_m3": 184000,
+    "dry": true,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-30",
+    "change_m3": 292000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-10-31",
+    "change_m3": 254000,
+    "dry": false,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-11-01",
+    "change_m3": 181000,
+    "dry": true,
+    "dry_source": "amedas"
+   },
+   {
+    "date": "2026-11-02",
+    "change_m3": 163000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-11-03",
+    "change_m3": 214000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-11-04",
+    "change_m3": 128000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-11-05",
+    "change_m3": 93000,
+    "dry": false,
+    "dry_source": "nippou"
+   },
+   {
+    "date": "2026-11-06",
+    "change_m3": 267000,
+    "dry": false,
+    "dry_source": "unknown"
+   }
+  ],
+  "rate_pool": "all_days"
+ },
+ "params": {
+  "rate_m3_per_day": 0,
+  "window_days": 14,
+  "min_dry_days": 3
+ },
+ "forecast": [
+  {
+   "date": "2026-11-07",
+   "horizon_days": 1,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-08",
+   "horizon_days": 2,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-09",
+   "horizon_days": 3,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-10",
+   "horizon_days": 4,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-11",
+   "horizon_days": 5,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-12",
+   "horizon_days": 6,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-13",
+   "horizon_days": 7,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-14",
+   "horizon_days": 8,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-15",
+   "horizon_days": 9,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-16",
+   "horizon_days": 10,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-17",
+   "horizon_days": 11,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-18",
+   "horizon_days": 12,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-19",
+   "horizon_days": 13,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-20",
+   "horizon_days": 14,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-21",
+   "horizon_days": 15,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-22",
+   "horizon_days": 16,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-23",
+   "horizon_days": 17,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-24",
+   "horizon_days": 18,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-25",
+   "horizon_days": 19,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-26",
+   "horizon_days": 20,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-27",
+   "horizon_days": 21,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-28",
+   "horizon_days": 22,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-29",
+   "horizon_days": 23,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-11-30",
+   "horizon_days": 24,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-12-01",
+   "horizon_days": 25,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-12-02",
+   "horizon_days": 26,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-12-03",
+   "horizon_days": 27,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  },
+  {
+   "date": "2026-12-04",
+   "horizon_days": 28,
+   "storage_m3": 19185000,
+   "storage_pct": 34.84
+  }
+ ]
+}
