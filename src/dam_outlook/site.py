@@ -100,6 +100,7 @@ def load(normalized_dir: Path, forecast_dir: Path, verification_dir: Path, event
         "baseline": latest_of(BASELINE),
         "norain": latest_of(NORAIN),
         "n_forecasts": len(forecasts),
+        "forecasts": forecasts,
         "summary": read_csv(verification_dir / "summary.csv"),
         "hindcast": read_csv(verification_dir / "hindcast.csv"),
         "events": read_csv(events_path),
@@ -293,10 +294,12 @@ def chart_pair(chart_id: str, *args, **kwargs) -> str:
             f'<div class="chart-narrow">{line_chart(chart_id + "-n", *args, narrow=True, **kwargs)}</div>')
 
 
-def legend(items: list[tuple[str, str, bool]], restriction: bool = False) -> str:
+def legend(items: list[tuple[str, str, bool]], restriction: bool = False, band: str | None = None) -> str:
     spans = []
     for name, cls, dash in items:
         spans.append(f'<span class="key"><svg width="22" height="10"><line class="line {cls}" x1="1" x2="21" y1="5" y2="5"{" stroke-dasharray=\"6 4\"" if dash else ""}/></svg>{esc(name)}</span>')
+    if band:
+        spans.append(f'<span class="key"><span class="swatch band-key"></span>{esc(band)}</span>')
     if restriction:
         spans.append('<span class="key"><span class="swatch"></span>筑後川の取水制限</span>')
     return f'<div class="legend">{"".join(spans)}</div>'
@@ -523,7 +526,7 @@ def method_details(sc: dict | None, nr: dict | None, bl: dict | None, hindcast: 
         parts.append(f"""<p class="note">過去にさかのぼった検証: {ym(first["first_base"])}〜{ym(first["last_base"])}の毎週（{esc(first["n"])}回）について、その日までのデータだけで予想し直し、実績と比べました。雨のシナリオからはその年を除き、当時の1か月予報は残っていないため3つの区分を同じ重みにしています。</p>
 <table><thead><tr><th></th><th>中央値の誤差</th><th>単純な外挿の誤差</th><th>CRPS</th><th>80%の範囲に入った割合</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="note">誤差は貯水量の平均絶対誤差です。単純な外挿は、直近14日のうち雨のなかった日の減り方の中央値をそのまま延ばした比較用の計算です。CRPS は範囲も含めた予想全体の外れ具合で、小さいほど良い値です。</p>""")
-    parts.append('<p class="note">発行した予想は、使った入力と一緒に書き換えずに保存し、下の「検証」で実績と比べます。</p>')
+    parts.append('<p class="note">発行した予想は、使った入力と一緒に書き換えずに保存し、ページ下の「予想の答え合わせ」で実績と比べます。</p>')
     return "\n".join(parts)
 
 
@@ -562,20 +565,94 @@ def section_history(data: dict) -> str:
 </section>"""
 
 
+CHECK_HORIZON = 7  # the answer-check chart shows forecasts issued this many days before
+FEW_CHECKS = 20  # fewer scored forecasts than this are marked as too few to judge by
+BUCKET_NAMES = {"1-7": "1〜7日先", "8-14": "8〜14日先", "15-28": "15〜28日先"}
+MODEL_NAMES = {SCENARIO: "予想", NORAIN: "雨なし", BASELINE: "単純な外挿"}
+
+
+def check_points(data: dict, horizon: int = CHECK_HORIZON) -> list[tuple[str, float, float, float]]:
+    """(date, p50, p10, p90) in % of each day's capacity, for the current scenario version's
+    forecasts issued `horizon` days before a day with a published rate; the latest issue wins."""
+    sc = data["scenario"]
+    if not sc:
+        return []
+    picked: dict[str, tuple] = {}
+    for f in sorted(data["forecasts"], key=lambda f: f["issued_at"]):
+        if (f["model"], f["model_version"], f.get("target")) != (sc["model"], sc["model_version"], TARGET):
+            continue
+        for p in f["forecast"]:
+            v = data["excl"].get(p["date"])
+            if p["horizon_days"] == horizon and v and v["published"]:
+                cap = v["capacity_m3"]
+                picked[p["date"]] = tuple(100 * p[k] / cap for k in ("storage_m3_p50", "storage_m3_p10", "storage_m3_p90"))
+    return [(d, *picked[d]) for d in sorted(picked)]
+
+
+def check_sentence(r: dict, cap: int) -> str:
+    """One horizon bucket of the current model in plain words. Each clause has one rule."""
+    mae, bias = int(r["mae_m3"]), int(r["bias_m3"])
+    n = int(r["n"])
+    out = [f"ずれは平均 約{100 * mae / cap:.1f}ポイント（{fmt_m3(mae)}）。"]
+    if r["p10_p90_coverage"]:
+        out.append(f"実績が80%の範囲に入ったのは{100 * float(r['p10_p90_coverage']):.0f}%。")
+    if r["mae_skill"]:
+        skill = float(r["mae_skill"])
+        out.append(f"単純な外挿と比べて、ずれは{abs(100 * skill):.0f}%{'小さい' if skill >= 0 else '大きい'}。")
+    if abs(bias) >= mae / 2:
+        out.append(f"平均すると実績より{'低め' if bias < 0 else '高め'}でした。")
+    few = "。回数が少ないので参考程度" if n < FEW_CHECKS else ""
+    return f'<li><b>{BUCKET_NAMES.get(r["horizon"], esc(r["horizon"]))}</b>（{n}回{few}）: {"".join(out)}</li>'
+
+
+def bucket_order(r: dict) -> int:
+    return list(BUCKET_NAMES).index(r["horizon"]) if r["horizon"] in BUCKET_NAMES else 99
+
+
+def summary_order(r: dict) -> tuple:
+    """Models in MODEL_NAMES order, newest version first, then nearest horizon first."""
+    models = list(MODEL_NAMES)
+    return (models.index(r["model"]) if r["model"] in models else 99, -int(r["model_version"] or 0), bucket_order(r))
+
+
 def section_verification(data: dict) -> str:
-    s = data["summary"]
+    """The answer check, folded at the bottom: a chart and plain sentences for the current model,
+    with every model's scores in a nested table."""
+    s, sc = data["summary"], data["scenario"]
+    head = '<summary>予想の答え合わせ <span class="badge model">モデル評価</span></summary>'
     if not s:
-        body = f'<p class="muted">予想した日の公表値が出ると、ここで検証します（発行済みの予想 {data["n_forecasts"]} 件）。</p>'
-    else:
-        rows = "".join(
-            f'<tr><td>{esc(r["model"])} v{esc(r["model_version"])}</td><td>{esc(r["horizon"])}日</td><td class="num">{esc(r["n"])}</td>'
-            f'<td class="num">{fmt_m3(r["mae_m3"])}</td><td class="num">{esc(r["mae_skill"]) or "—"}</td>'
-            f'<td class="num">{esc(r["p10_p90_coverage"]) or "—"}</td><td class="num">{esc(r["brier_mean"]) or "—"}</td></tr>'
-            for r in s
-        )
-        body = f"""<table><thead><tr><th>モデル</th><th>何日先</th><th>件数</th><th>平均絶対誤差</th><th>単純な外挿比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
-<p class="note">単純な外挿比スキル = 1 − 誤差 ÷ 単純な外挿の誤差（0より大きければ良い）。単純な外挿は、直近14日のうち雨のなかった日の減り方の中央値をそのまま延ばした比較用の計算です。80%範囲の的中率は 0.8 に近いほど適切です。Brier は閾値を下回る確率の誤差です（0 が最良）。</p>"""
-    return f'<section><h2>検証 <span class="badge model">モデル評価</span></h2>{body}</section>'
+        body = f'<p class="muted">予想した日の公表値が出ると、ここで実績と比べます（発行済みの予想 {data["n_forecasts"]} 件）。</p>'
+        return f'<section class="quiet"><details>{head}{body}</details></section>'
+    parts = ['<p class="note">このサイトが出した予想を、あとで公表された実績と比べています。</p>']
+    pts = check_points(data)
+    if len(pts) > 1:
+        actual = [(d, v["pct"]) for d, v in sorted(data["excl"].items()) if v["published"] and pts[0][0] <= d <= pts[-1][0]]
+        series = [{"name": "実績", "cls": "s1", "points": actual, "end_marker": True},
+                  {"name": f"{CHECK_HORIZON}日前の予想", "cls": "s2", "points": [(d, p50) for d, p50, _, _ in pts]}]
+        band = {"name": "80%の範囲", "cls": "s2", "points": [(d, lo, hi) for d, _, lo, hi in pts]}
+        parts.append(chart_pair("check", series, band, f"{CHECK_HORIZON}日前の予想と実績"))
+        parts.append(legend([("実績", "s1", False), (f"{CHECK_HORIZON}日前の予想", "s2", False)], band="予想の80%の範囲"))
+        parts.append(f'<p class="note">各日の実績（青）と、その{CHECK_HORIZON}日前に出した予想です。青い線が帯の中にあれば、予想の範囲に収まっています。</p>')
+    current = [r for r in s if sc and (r["model"], r["model_version"]) == (sc["model"], str(sc["model_version"]))]
+    if current:
+        cap = sc["inputs"]["capacity_m3"]
+        items = "".join(check_sentence(r, cap) for r in sorted(current, key=bucket_order))
+        parts.append(f'<h3>いまの計算方法（v{esc(sc["model_version"])}）の成績</h3><ul class="note checks">{items}</ul>')
+        parts.append('<p class="note">読み方: ずれは貯水率（渇水対策容量分を除く）の差で、小さいほど良い予想です。'
+                     '「80%の範囲」に実績が入る割合は80%前後がちょうどよく、それより高ければ範囲が広すぎ、低ければ狭すぎです。'
+                     '単純な外挿は、直近14日のうち雨のなかった日の減り方をそのまま延ばした比較用の計算で、これよりずれが小さければ予想に意味があると言えます。</p>')
+    rows = "".join(
+        f'<tr><td>{MODEL_NAMES.get(r["model"], esc(r["model"]))} v{esc(r["model_version"])}</td><td>{BUCKET_NAMES.get(r["horizon"], esc(r["horizon"]))}</td><td class="num">{esc(r["n"])}</td>'
+        f'<td class="num">{fmt_m3(r["mae_m3"])}</td><td class="num">{fmt_m3(r["bias_m3"])}</td><td class="num">{esc(r["mae_skill"]) or "—"}</td>'
+        f'<td class="num">{esc(r["p10_p90_coverage"]) or "—"}</td><td class="num">{esc(r["brier_mean"]) or "—"}</td></tr>'
+        for r in sorted(s, key=summary_order)
+    )
+    parts.append(f"""<details><summary>すべての版の数値を表で見る</summary>
+<table><thead><tr><th>計算</th><th>何日先</th><th>回数</th><th>平均のずれ</th><th>平均の偏り</th><th>単純な外挿比スキル</th><th>80%範囲の的中率</th><th>Brier</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="note">予想 = このサイトの予想（{esc(SCENARIO)}）、雨なし = この先の雨を0とした計算（{esc(NORAIN)}）、単純な外挿 = 比較用の計算（{esc(BASELINE)}）。版（v）は計算方法を変えるたびに上がります。
+平均のずれは貯水量の平均絶対誤差、平均の偏りはマイナスなら実績より低めの予想です。単純な外挿比スキル = 1 − 誤差 ÷ 単純な外挿の誤差（0より大きければ良い）。80%範囲の的中率は 0.8 に近いほど適切です。Brier は「貯水率が35・30・25・20%を下回る確率」の当たり具合で、0 が最良です。</p>
+</details>""")
+    return f'<section class="quiet"><details>{head}{"".join(parts)}</details></section>'
 
 
 def restriction_details(events: list[dict]) -> str:
@@ -648,6 +725,11 @@ a{color:var(--s1)}
 .crosshair{stroke:var(--axis);stroke-width:1}.hit{fill:transparent}
 .swatch{display:inline-block;width:14px;height:10px;background:var(--warn);opacity:.4;border-radius:2px}
 .chart-narrow{display:none}@media (max-width:600px){.chart-wide{display:none}.chart-narrow{display:block}}
+section.quiet{background:none;-webkit-backdrop-filter:none;backdrop-filter:none;border-style:dashed;padding:8px 16px}
+section.quiet>details>summary{margin:0;font-size:14px}
+ul.checks{padding-left:20px}ul.checks li{margin:4px 0}
+.swatch.band-key{background:var(--s2);opacity:.25}
+.share{display:flex;gap:12px;align-items:center;margin:16px 0 8px}.share .qr{width:112px;height:112px;flex:none;border-radius:4px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink2);margin:8px 0}
 .key{display:inline-flex;align-items:center;gap:6px}
 .tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--border);
@@ -698,6 +780,7 @@ def render(data: dict) -> str:
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
 <p>計算のコード・発行した予想・検証の結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
+<div class="share">{QR_SVG}<p>このページをスマホで開く・共有する<br><a href="{SITE_URL}">{SITE_URL.removeprefix("https://").rstrip("/")}</a></p></div>
 </footer>
 </main><script>{JS}</script></body></html>
 """
@@ -708,6 +791,14 @@ def render(data: dict) -> str:
 # rsvg-convert -w 180 -h 180 of FAVICON with rx="7" removed.
 FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><clipPath id="c"><rect width="32" height="32" rx="7"/></clipPath><g clip-path="url(#c)"><rect width="32" height="32" fill="#1f5fae"/><path d="M0 15c3-1.6 5-1.6 8 0s5 1.6 8 0l4-.6V32H0z" fill="#8cc4ff"/><path d="M19 8h4.5L31 32H19z" fill="#f0efec"/></g></svg>
 """
+
+SITE_URL = "https://dam-outlook.pages.dev/"  # the published site (docs/publishing.md)
+# assets/qr.svg encodes SITE_URL; it is committed so the build needs no QR library. Regenerate with
+# segno (outside requirements.txt): segno.make(SITE_URL, error="m").save("qr.svg", kind="svg",
+# xmldecl=False, nl=False, border=4, dark="#000", light="#fff", omitsize=True), then replace
+# class="segno" with class="qr" shape-rendering="crispEdges". Dark on white in both themes, for scanners.
+QR_SVG = (Path(__file__).parent / "assets" / "qr.svg").read_text(encoding="utf-8").strip().replace(
+    "<svg ", '<svg role="img" aria-label="このページのURLのQRコード" ', 1)
 
 NOT_FOUND = """<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

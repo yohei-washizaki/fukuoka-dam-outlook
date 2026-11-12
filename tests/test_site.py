@@ -21,6 +21,11 @@ class SiteTest(unittest.TestCase):
             self.assertIn("データがまだありません", page)
             self.assertNotIn("データ取得", page)  # no fetch log
             self.assertIn("予想はまだ発行されていません", page)
+            self.assertIn('<section class="quiet"><details><summary>予想の答え合わせ', page)  # folded
+            # The QR code of the published URL ends the page.
+            self.assertIn('<svg role="img" aria-label="このページのURLのQRコード"', page)
+            self.assertLess(page.index("QRコード"), page.index("</footer>"))
+            self.assertIn('<a href="https://dam-outlook.pages.dev/">dam-outlook.pages.dev</a>', page)
             self.assertNotIn('class="water"', page)  # no published rate, no water
 
     def test_footer_shows_last_successful_fetch(self):
@@ -91,7 +96,36 @@ class SiteTest(unittest.TestCase):
             self.assertNotIn('name="robots"', page)  # indexed since 2026-10-26
             self.assertIn('<link rel="icon" href="favicon.svg"', page)
             self.assertIn('<link rel="apple-touch-icon" href="apple-touch-icon.png"', page)
-            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
+            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook", site.SITE_URL])
+
+    def test_answer_check(self):
+        cap = 1000000
+        excl = {f"2026-11-{d:02d}": {"pct": 30.0 + d / 10, "published": d != 5, "capacity_m3": cap, "storage_m3": 0}
+                for d in range(1, 12)}
+
+        def fc(issued, base, v, offset=0):
+            return {"model": site.SCENARIO, "model_version": v, "target": site.TARGET, "issued_at": issued,
+                    "base_date": base, "inputs": {"capacity_m3": cap},
+                    "forecast": [{"date": f"2026-11-{int(base[-2:]) + 7:02d}", "horizon_days": 7,
+                                  "storage_m3_p50": 310000 + offset, "storage_m3_p10": 300000, "storage_m3_p90": 320000}]}
+        forecasts = [fc("2026-11-01T10:00", "2026-11-01", 2), fc("2026-11-01T12:00", "2026-11-01", 2, offset=1000),
+                     fc("2026-11-02T10:00", "2026-11-02", 1),  # older version, left out
+                     fc("2026-11-03T10:00", "2026-11-03", 2), fc("2026-11-04T10:00", "2026-11-04", 2)]
+        data = {"scenario": forecasts[-1], "forecasts": forecasts, "excl": excl}
+        # The latest issue for a day wins; days without a published rate are skipped.
+        self.assertEqual([(d, round(p50, 2)) for d, p50, _, _ in site.check_points(data)],
+                         [("2026-11-08", 31.1), ("2026-11-10", 31.0), ("2026-11-11", 31.0)])
+        row = {"horizon": "1-7", "n": "12", "mae_m3": "20000", "bias_m3": "-15000", "mae_skill": "0.25", "p10_p90_coverage": "0.833"}
+        text = site.check_sentence(row, cap)
+        self.assertIn("<b>1〜7日先</b>（12回。回数が少ないので参考程度）", text)
+        self.assertIn("ずれは平均 約2.0ポイント", text)
+        self.assertIn("範囲に入ったのは83%", text)
+        self.assertIn("ずれは25%小さい", text)
+        self.assertIn("実績より低め", text)
+        text = site.check_sentence({**row, "n": "20", "bias_m3": "5000", "mae_skill": "-0.1"}, cap)
+        self.assertNotIn("参考程度", text)
+        self.assertNotIn("めでした", text)  # bias under half the error is not called a lean
+        self.assertIn("ずれは10%大きい", text)
 
     def test_morning_estimate_before_the_status_page(self):
         no_reserve(self)
