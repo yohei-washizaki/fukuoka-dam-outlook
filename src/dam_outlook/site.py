@@ -368,7 +368,7 @@ def section_now(data: dict) -> str:
         dm = cur["storage_m3"] - prev["storage_m3"]
         delta = f"<br>前回（{md(prev_d)}）から {cur['pct'] - prev['pct']:+.2f}ポイント・{dm / 10000:+,.0f}万m³"
     if early:
-        badge = '<span class="badge est">速報（推定）</span>'
+        badge = '<span class="badge est">速報</span>'
         basis = f"<br>市の公表前の速報値から、{md(pub[-1])}の渇水対策容量分を引いた推定です。"
         incl_pct = data["total"][d]["storage_pct"]
     else:
@@ -465,7 +465,7 @@ def section_outlook(data: dict) -> str:
     issued = datetime.fromisoformat(f["issued_at"]).astimezone(JST)
     models = " / ".join(f'{esc(x["model"])} v{esc(x["model_version"])}' for x in (sc, bl, data["baseline"]) if x)
     return f"""<section>
-<h2>予想 <span class="badge model">モデル出力</span></h2>
+<h2>予想</h2>
 {chart}
 {legend(keys, restriction=True)}
 <p class="sub">{issued:%Y-%m-%d %H:%M} 更新</p>
@@ -619,7 +619,7 @@ def section_verification(data: dict) -> str:
     """The answer check, folded at the bottom: a chart and plain sentences for the current model,
     with every model's scores in a nested table."""
     s, sc = data["summary"], data["scenario"]
-    head = '<summary>予想の答え合わせ <span class="badge model">モデル評価</span></summary>'
+    head = '<summary>予想の答え合わせ</summary>'
     if not s:
         body = f'<p class="muted">予想した日の公表値が出ると、ここで実績と比べます（発行済みの予想 {data["n_forecasts"]} 件）。</p>'
         return f'<section class="quiet"><details>{head}{body}</details></section>'
@@ -705,7 +705,7 @@ h3{font-size:14px;margin:12px 0 0}
 .bar i{display:block;height:100%;background:var(--s1)}
 .tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}
 .badge{font-size:11px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--border);color:var(--ink2)}
-.badge.fact{border-color:var(--s1)}.badge.est{border-color:var(--s1);border-style:dashed}.badge.model{border-color:var(--s2)}.badge.warn{border-color:var(--warn)}
+.badge.fact{border-color:var(--s1)}.badge.est{border-color:var(--s1);border-style:dashed}.badge.warn{border-color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0;display:block;overflow-x:auto}
 th,td{padding:4px 8px;border-bottom:1px solid var(--grid);text-align:left;white-space:nowrap}
 .num{text-align:right;font-variant-numeric:tabular-nums}
@@ -780,7 +780,7 @@ def render(data: dict) -> str:
 出典: 福岡市「福岡市関連９ダム貯水量」（BODIK、CC BY）を加工して作成。<br>
 出典: 気象庁ホームページ（<a href="https://www.jma.go.jp/">https://www.jma.go.jp/</a>）の1か月予報・アメダス観測値・過去の気象データ。これらを加工して作成しており、編集・加工の責任は本サイトにあります。</p>
 <p>計算のコード・発行した予想・検証の結果: <a href="https://github.com/yohei-washizaki/fukuoka-dam-outlook">GitHub</a></p>
-<div class="share">{QR_SVG}<p>このページをスマホで開く・共有する<br><a href="{SITE_URL}">{SITE_URL.removeprefix("https://").rstrip("/")}</a></p></div>
+<div class="share">{QR_SVG}</div>
 </footer>
 </main><script>{JS}</script></body></html>
 """

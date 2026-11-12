@@ -25,7 +25,7 @@ class SiteTest(unittest.TestCase):
             # The QR code of the published URL ends the page.
             self.assertIn('<svg role="img" aria-label="このページのURLのQRコード"', page)
             self.assertLess(page.index("QRコード"), page.index("</footer>"))
-            self.assertIn('<a href="https://dam-outlook.pages.dev/">dam-outlook.pages.dev</a>', page)
+            self.assertNotIn("スマホで開く", page)
             self.assertNotIn('class="water"', page)  # no published rate, no water
 
     def test_footer_shows_last_successful_fetch(self):
@@ -62,7 +62,7 @@ class SiteTest(unittest.TestCase):
             (norm / "dam_storage_chart.csv").unlink()  # keep the history chart to the published days
             data = site.load(norm, tmp / "f", tmp / "v", events)
             page = site.render(data)
-            self.assertIn("モデル出力", page)
+            self.assertNotIn("モデル出力", page)
             self.assertIn("公表値", page)
             self.assertIn("&lt;15%&gt;", page)  # escaped
             self.assertIn("未確認", page)
@@ -96,7 +96,7 @@ class SiteTest(unittest.TestCase):
             self.assertNotIn('name="robots"', page)  # indexed since 2026-10-26
             self.assertIn('<link rel="icon" href="favicon.svg"', page)
             self.assertIn('<link rel="apple-touch-icon" href="apple-touch-icon.png"', page)
-            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook", site.SITE_URL])
+            self.assertEqual(re.findall(r'<a href="([^"]+)"', page), ["https://www.jma.go.jp/", "https://github.com/yohei-washizaki/fukuoka-dam-outlook"])
 
     def test_answer_check(self):
         cap = 1000000
@@ -136,7 +136,7 @@ class SiteTest(unittest.TestCase):
             # Printed through 10/22 with 2000 m³ of reserve; 10/23 9:00 is known only from BODIK.
             write(norm / "dam_storage_excl.csv", TABLE_COLUMNS["dam_storage_excl"], excl_rows(days[:2], reserve_m3=2000))
             page = site.section_now(site.load(norm, norm / "f", norm / "v", norm / "events.csv"))
-            self.assertIn("速報（推定）", page)
+            self.assertIn('<span class="badge est">速報</span>', page)
             self.assertIn("10/23 9時", page)
             self.assertIn("49.00%", page)  # (51000 - 2000) / 100000
             self.assertIn("前回（10/22）から +0.50ポイント", page)
