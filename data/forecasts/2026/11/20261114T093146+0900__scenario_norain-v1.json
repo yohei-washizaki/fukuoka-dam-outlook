@@ -1,0 +1,215 @@
+{
+ "model": "scenario_norain",
+ "model_version": "1",
+ "issued_at": "2026-11-14T09:31:46+09:00",
+ "base_date": "2026-11-14",
+ "target": "storage_excl_reserve_m3",
+ "base_sources": "bodik_hourly",
+ "inputs_sha256": "0fd3ec98e7d46bac6663f9768ca9d6022e90ad965fe66370af972c4ec3c2c60d",
+ "inputs": {
+  "base_date": "2026-11-14",
+  "base_storage_m3": 35739000,
+  "base_excl_storage_m3": 19608000,
+  "reserve_m3": 16131000,
+  "reserve_date": "2026-11-13",
+  "reserve_source": "carried from 2026-11-13",
+  "capacity_m3": 55071000,
+  "incl_capacity_m3": 78347000,
+  "training_sha256": "7a85fa50b3bfc6ed24d4ffddcbac54d561d298b0bebd4e851eb3aac6ea16c94a",
+  "slow_state_mm": 7.998,
+  "observed_rain_mm": {
+   "2026-11-11": 0.0,
+   "2026-11-12": 0.0,
+   "2026-11-13": 0.0
+  }
+ },
+ "params": {
+  "const_m3_per_day": -288616.3,
+  "quick_m3_per_mm": [
+   7369.2,
+   16942.3,
+   5747.7,
+   4391.1
+  ],
+  "slow_m3_per_mm": 25899.2,
+  "level_m3_per_day": -370799.7,
+  "level_source": "recent_residuals",
+  "level_days": 23,
+  "level_sigma_m3_per_day": 141034.0,
+  "training_days": 1507,
+  "training_first": "2022-04-02",
+  "training_last": "2026-11-13",
+  "slow_tau_days": 10.0,
+  "full_share": 0.93
+ },
+ "forecast": [
+  {
+   "date": "2026-11-15",
+   "horizon_days": 1,
+   "storage_m3": 19424631,
+   "storage_pct": 35.27
+  },
+  {
+   "date": "2026-11-16",
+   "horizon_days": 2,
+   "storage_m3": 19223425,
+   "storage_pct": 34.91
+  },
+  {
+   "date": "2026-11-17",
+   "horizon_days": 3,
+   "storage_m3": 19006080,
+   "storage_pct": 34.51
+  },
+  {
+   "date": "2026-11-18",
+   "horizon_days": 4,
+   "storage_m3": 18774132,
+   "storage_pct": 34.09
+  },
+  {
+   "date": "2026-11-19",
+   "horizon_days": 5,
+   "storage_m3": 18528971,
+   "storage_pct": 33.65
+  },
+  {
+   "date": "2026-11-20",
+   "horizon_days": 6,
+   "storage_m3": 18271853,
+   "storage_pct": 33.18
+  },
+  {
+   "date": "2026-11-21",
+   "horizon_days": 7,
+   "storage_m3": 18003917,
+   "storage_pct": 32.69
+  },
+  {
+   "date": "2026-11-22",
+   "horizon_days": 8,
+   "storage_m3": 17726193,
+   "storage_pct": 32.19
+  },
+  {
+   "date": "2026-11-23",
+   "horizon_days": 9,
+   "storage_m3": 17439611,
+   "storage_pct": 31.67
+  },
+  {
+   "date": "2026-11-24",
+   "horizon_days": 10,
+   "storage_m3": 17145015,
+   "storage_pct": 31.13
+  },
+  {
+   "date": "2026-11-25",
+   "horizon_days": 11,
+   "storage_m3": 16843167,
+   "storage_pct": 30.58
+  },
+  {
+   "date": "2026-11-26",
+   "horizon_days": 12,
+   "storage_m3": 16534757,
+   "storage_pct": 30.02
+  },
+  {
+   "date": "2026-11-27",
+   "horizon_days": 13,
+   "storage_m3": 16220410,
+   "storage_pct": 29.45
+  },
+  {
+   "date": "2026-11-28",
+   "horizon_days": 14,
+   "storage_m3": 15900691,
+   "storage_pct": 28.87
+  },
+  {
+   "date": "2026-11-29",
+   "horizon_days": 15,
+   "storage_m3": 15576111,
+   "storage_pct": 28.28
+  },
+  {
+   "date": "2026-11-30",
+   "horizon_days": 16,
+   "storage_m3": 15247133,
+   "storage_pct": 27.69
+  },
+  {
+   "date": "2026-12-01",
+   "horizon_days": 17,
+   "storage_m3": 14914175,
+   "storage_pct": 27.08
+  },
+  {
+   "date": "2026-12-02",
+   "horizon_days": 18,
+   "storage_m3": 14577615,
+   "storage_pct": 26.47
+  },
+  {
+   "date": "2026-12-03",
+   "horizon_days": 19,
+   "storage_m3": 14237798,
+   "storage_pct": 25.85
+  },
+  {
+   "date": "2026-12-04",
+   "horizon_days": 20,
+   "storage_m3": 13895032,
+   "storage_pct": 25.23
+  },
+  {
+   "date": "2026-12-05",
+   "horizon_days": 21,
+   "storage_m3": 13549598,
+   "storage_pct": 24.6
+  },
+  {
+   "date": "2026-12-06",
+   "horizon_days": 22,
+   "storage_m3": 13201750,
+   "storage_pct": 23.97
+  },
+  {
+   "date": "2026-12-07",
+   "horizon_days": 23,
+   "storage_m3": 12851718,
+   "storage_pct": 23.34
+  },
+  {
+   "date": "2026-12-08",
+   "horizon_days": 24,
+   "storage_m3": 12499710,
+   "storage_pct": 22.7
+  },
+  {
+   "date": "2026-12-09",
+   "horizon_days": 25,
+   "storage_m3": 12145914,
+   "storage_pct": 22.06
+  },
+  {
+   "date": "2026-12-10",
+   "horizon_days": 26,
+   "storage_m3": 11790499,
+   "storage_pct": 21.41
+  },
+  {
+   "date": "2026-12-11",
+   "horizon_days": 27,
+   "storage_m3": 11433621,
+   "storage_pct": 20.76
+  },
+  {
+   "date": "2026-12-12",
+   "horizon_days": 28,
+   "storage_m3": 11075417,
+   "storage_pct": 20.11
+  }
+ ]
+}
