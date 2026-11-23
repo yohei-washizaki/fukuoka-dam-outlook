@@ -529,3 +529,13 @@ date,dam_id,dam_name,storage_pct,storage_m3,capacity_m3,change_m3,precip_mm,prec
 2026-11-22,sefuri,脊振ダム,31.67,1260000,3979000,,,,bodik_hourly
 2026-11-22,total,合計,47.04,36852000,78347000,,,,bodik_hourly
 2026-11-22,zuibaiji,瑞梅寺ダム,100.0,1220000,1220000,,,,bodik_hourly
+2026-11-23,egawa,江川ダム,25.5,6121000,24000000,,,,bodik_hourly
+2026-11-23,gokayama,五ケ山ダム,47.39,15022000,31700000,,,,bodik_hourly
+2026-11-23,inono,猪野ダム,57.42,2096000,3650000,,,,bodik_hourly
+2026-11-23,kubara,久原ダム,85.55,1249000,1460000,,,,bodik_hourly
+2026-11-23,magarifuchi,曲渕ダム,99.83,2364000,2368000,,,,bodik_hourly
+2026-11-23,minamihata,南畑ダム,60.18,3081000,5120000,,,,bodik_hourly
+2026-11-23,nagatani,長谷ダム,92.58,4490000,4850000,,,,bodik_hourly
+2026-11-23,sefuri,脊振ダム,31.87,1268000,3979000,,,,bodik_hourly
+2026-11-23,total,合計,47.11,36909000,78347000,,,,bodik_hourly
+2026-11-23,zuibaiji,瑞梅寺ダム,99.84,1218000,1220000,,,,bodik_hourly
